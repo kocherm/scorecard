@@ -14,3 +14,7 @@
 {{ summary_strip(vm) }}
 {{ grid_tables(vm, editable=can_edit) }}
 {% endblock %}
+{% block fab %}
+{% from "_icons.html" import icon %}
+<a class="fab" href="/display?token={{ display_token }}" title="Switch to display mode">{{ icon('monitor') }}</a>
+{% endblock %}

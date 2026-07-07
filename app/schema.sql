@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS metrics (
     unit        TEXT,
     dri_user_id INTEGER REFERENCES users(id),
     start_week  TEXT    NOT NULL CHECK (strftime('%w', start_week) = '1'),
+    is_key      INTEGER NOT NULL DEFAULT 0 CHECK (is_key IN (0,1)),
     sort_order  INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),

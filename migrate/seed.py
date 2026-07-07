@@ -120,6 +120,11 @@ def main() -> None:
         metric("intern_rate", s_fulfil, "Intern task completion rate", "numeric", 3,
                rollup="average", unit="%")
 
+        # Dan Martell's leading trio: bolded and starred on the board.
+        for key in ("conversations", "calls_held", "proposals"):
+            if key in mid:
+                con.execute("UPDATE metrics SET is_key = 1 WHERE id = ?", (mid[key],))
+
         # ---- targets (baseline weeks 1-6 / stretch weeks 7+)
         tq = data.get("target_quarter", {"year": 2026, "quarter": 3})
         for key, pair in data.get("targets", {}).items():

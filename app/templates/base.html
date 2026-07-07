@@ -4,34 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Scorecard{% endblock %} - Aprendio</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/scorecard.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
+{% from "_icons.html" import icon %}
 {% block chrome %}
-<header class="topbar">
-  <div class="brand"><span class="seam"></span>APRENDIO <span class="sub">Scorecard</span></div>
+<aside class="sidenav">
+  <a class="logo" href="/" title="Aprendio Scorecard"><img src="/static/logo-dark.svg" alt="Aprendio"></a>
   <nav>
-    <a href="/" class="{% if active == 'grid' %}active{% endif %}">Scorecard</a>
+    <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
     {% if user and user['role'] == 'admin' %}
-    <a href="/admin/metrics" class="{% if active == 'metrics' %}active{% endif %}">Metrics</a>
-    <a href="/admin/targets" class="{% if active == 'targets' %}active{% endif %}">Targets</a>
-    <a href="/admin/users" class="{% if active == 'users' %}active{% endif %}">Users</a>
-    <a href="/admin/tokens" class="{% if active == 'tokens' %}active{% endif %}">API</a>
-    <a href="/admin/settings" class="{% if active == 'settings' %}active{% endif %}">Settings</a>
+    <a href="/admin/metrics" title="Sections &amp; Metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('sliders') }}</a>
+    <a href="/admin/targets" title="Targets" class="{% if active == 'targets' %}active{% endif %}">{{ icon('target') }}</a>
+    <a href="/admin/users" title="Users" class="{% if active == 'users' %}active{% endif %}">{{ icon('users') }}</a>
+    <a href="/admin/tokens" title="API tokens" class="{% if active == 'tokens' %}active{% endif %}">{{ icon('key') }}</a>
+    <a href="/admin/settings" title="Settings" class="{% if active == 'settings' %}active{% endif %}">{{ icon('gear') }}</a>
     {% endif %}
   </nav>
-  <div class="spacer"></div>
+  <div class="grow"></div>
   {% if user %}
-  <span class="who">{{ user['display_name'] }} &middot; {{ user['role'] }}</span>
-  <a class="logout" href="/account">Account</a>
-  <form method="post" action="/logout" style="margin:0"><button class="logout" style="background:none;border:none;cursor:pointer;font:inherit">Sign out</button></form>
+  <a href="/account" title="{{ user['display_name'] }} &middot; Account" class="{% if active == 'account' %}active{% endif %}">{{ icon('user') }}</a>
+  <form method="post" action="/logout"><button type="submit" title="Sign out">{{ icon('signout') }}</button></form>
   {% endif %}
-</header>
+</aside>
 {% endblock %}
 <main class="page">
 {% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>
+{% block fab %}{% endblock %}
 </body>
 </html>

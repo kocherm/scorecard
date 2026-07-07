@@ -25,6 +25,7 @@ class Cell:
 class Row:
     metric_id: int
     last_state: str  # cell state of the last closed week, for the row dot
+    is_key: bool     # leading indicator: bolded and starred
     name: str
     metric_type: str
     rollup: Optional[str]
@@ -102,7 +103,12 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                include_archived: bool = False) -> GridVM:
     tz = wk.BUSINESS_TZ
     today = now.astimezone(tz).date()
-    weeks = wk.window_weeks(today)
+    from .db import get_setting
+    try:
+        months = max(1, min(4, int(get_setting(con, "display_months", "2"))))
+    except (TypeError, ValueError):
+        months = 2
+    weeks = wk.window_weeks(today, months=months)
     bands = wk.month_bands(weeks)
     cur_week = wk.monday_of(today)
     week_keys = [w.isoformat() for w in weeks]
@@ -191,11 +197,18 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                 w = closed - timedelta(days=7 * i)
                 ei = entry_info(m["id"], w)
                 st = sc.cell_state(info, w, ei, target_for(m["id"], w), now, tz)
-                spark.append({
-                    "state": st.value,
-                    "value": (ei.value_numeric if ei and m["metric_type"] != "status"
-                              else None),
-                })
+                val = (ei.value_numeric if ei and m["metric_type"] != "status" else None)
+                # Bar height as % of target for numeric metrics (trajectory read).
+                pct = None
+                tgt = target_for(m["id"], w)
+                if (m["metric_type"] == "numeric" and val is not None
+                        and tgt is not None and tgt > 0):
+                    if m["direction"] == "down":
+                        ratio = 1.0 if val <= tgt else tgt / val
+                    else:
+                        ratio = val / tgt
+                    pct = int(max(0.15, min(1.0, ratio)) * 100)
+                spark.append({"state": st.value, "value": val, "pct": pct})
 
             cur_target = target_for(m["id"], cur_week)
             closed_entry = entry_info(m["id"], closed)
@@ -224,6 +237,7 @@ def build_grid(con: sqlite3.Connection, now: datetime,
             has_131 = (m["id"], closed.isoformat()) in otos
             vm.rows.append(Row(
                 metric_id=m["id"], last_state=closed_state.value,
+                is_key=bool(m["is_key"]),
                 name=m["name"], metric_type=m["metric_type"],
                 rollup=m["rollup"], direction=m["direction"], unit=m["unit"],
                 dri_name=m["dri_name"] or "-", dri_user_id=m["dri_user_id"],

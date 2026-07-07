@@ -37,9 +37,10 @@
         {% for row in section.rows %}
         <tr>
           <td class="metric-cell">
-            <div class="mrow">
+            <div class="mrow {% if row.is_key %}key{% endif %}">
               <span class="dot {{ row.last_state }}"></span>
               <span class="mname">{{ row.name }}</span>
+              {% if row.is_key %}<span class="keymark" title="Leading indicator">&#9733;</span>{% endif %}
               {% if row.escalation >= 1 %}
                 {% if editable %}
                 <a class="badge-131 {% if row.has_131 %}filed{% endif %}"
@@ -66,7 +67,10 @@
           <td class="pin actual">{{ row.actual_display }}</td>
           <td class="pin">
             <span class="spark">
-              {% for s in row.spark %}<i class="{{ s.state }}"></i>{% endfor %}
+              {% for s in row.spark %}
+                {% if s.pct is not none %}<i class="bar {{ s.state }}" style="height:{{ (s.pct * 0.22) | round(0, 'floor') | int + 4 }}px"></i>
+                {% else %}<i class="{{ s.state }}"></i>{% endif %}
+              {% endfor %}
             </span>
           </td>
         </tr>

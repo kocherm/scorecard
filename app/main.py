@@ -39,6 +39,10 @@ scheduler = BackgroundScheduler()
 async def lifespan(app: FastAPI):
     with dbm.get_db() as con:
         dbm.init_db(con)
+        try:  # migration for DBs created before the is_key column existed
+            con.execute("ALTER TABLE metrics ADD COLUMN is_key INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     scheduler.add_job(alerts.stale_sweep, CronTrigger(
@@ -126,7 +130,8 @@ def grid_page(request: Request, user=Depends(require_viewer),
               con: sqlite3.Connection = Depends(db_dep)):
     vm = gridm.build_grid(con, datetime.now(timezone.utc))
     return render(request, "grid.html", user=user, vm=vm, active="grid",
-                  can_edit=user["role"] in ("editor", "admin"))
+                  can_edit=user["role"] in ("editor", "admin"),
+                  display_token=dbm.get_setting(con, "display_token"))
 
 
 def _metric_or_404(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
@@ -327,17 +332,19 @@ def edit_metric(metric_id: int, section_id: int = Form(...), name: str = Form(..
                 metric_type: str = Form(...), rollup: str = Form("sum"),
                 unit: str = Form(""), direction: str = Form("up"),
                 dri_user_id: str = Form(""), start_week: str = Form(...),
-                sort_order: int = Form(0),
+                sort_order: int = Form(0), is_key: str = Form(""),
                 user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
     _metric_or_404(con, metric_id)
     start = wk.monday_of(date.fromisoformat(start_week)).isoformat()
     con.execute(
         """UPDATE metrics SET section_id=?, name=?, metric_type=?, rollup=?, direction=?,
-                              unit=?, dri_user_id=?, start_week=?, sort_order=? WHERE id=?""",
+                              unit=?, dri_user_id=?, start_week=?, sort_order=?, is_key=?
+           WHERE id=?""",
         (section_id, name, metric_type,
          rollup if metric_type == "numeric" else None,
          direction, unit or None,
-         int(dri_user_id) if dri_user_id else None, start, sort_order, metric_id))
+         int(dri_user_id) if dri_user_id else None, start, sort_order,
+         1 if is_key else 0, metric_id))
     return RedirectResponse("/admin/metrics", status_code=303)
 
 
@@ -503,7 +510,15 @@ def admin_settings(request: Request, user=Depends(require_admin),
                   display_token=dbm.get_setting(con, "display_token"),
                   slack_webhook_url=dbm.get_setting(con, "slack_webhook_url") or "",
                   slack_bot_token=dbm.get_setting(con, "slack_bot_token") or "",
+                  display_months=int(dbm.get_setting(con, "display_months", "2")),
                   base_url=str(request.base_url).rstrip("/"))
+
+
+@app.post("/admin/settings/display-months")
+def save_display_months(display_months: int = Form(...), user=Depends(require_admin),
+                        con: sqlite3.Connection = Depends(db_dep)):
+    dbm.set_setting(con, "display_months", str(max(1, min(4, display_months))))
+    return RedirectResponse("/admin/settings", status_code=303)
 
 
 @app.post("/admin/settings/rotate-display-token")

@@ -14,6 +14,19 @@
   </form>
 </div>
 <div class="panel" style="max-width:640px">
+  <h2>Display window</h2>
+  <p class="note">How many calendar months of weekly columns the scorecard shows. Fewer months = bigger, calmer board.</p>
+  <form method="post" action="/admin/settings/display-months" style="display:flex; gap:10px; align-items:end">
+    <div><label>Months visible</label>
+      <select name="display_months" style="width:120px">
+        {% for n in [2, 3, 4] %}
+        <option value="{{ n }}" {% if display_months == n %}selected{% endif %}>{{ n }} months</option>
+        {% endfor %}
+      </select></div>
+    <button class="btn" type="submit">Save</button>
+  </form>
+</div>
+<div class="panel" style="max-width:640px">
   <h2>Slack alerts</h2>
   <p class="note">Stale sweep runs Wednesday 8:00 AM Chicago; red-escalation sweep Tuesday 8:00 AM. Channel messages use the webhook; DMs to DRIs need the bot token + each user's Slack member ID (Users page).</p>
   <form method="post" action="/admin/settings/slack">

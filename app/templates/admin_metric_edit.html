@@ -38,6 +38,10 @@
     <input type="date" name="start_week" value="{{ m['start_week'] }}">
     <label>Sort order</label>
     <input type="number" name="sort_order" value="{{ m['sort_order'] }}">
+    <label style="display:flex; align-items:center; gap:8px; margin-top:14px">
+      <input type="checkbox" name="is_key" value="1" {% if m['is_key'] %}checked{% endif %} style="width:auto">
+      Key metric (leading indicator: bolded and starred on the scorecard)
+    </label>
     <div style="margin-top:16px; display:flex; gap:10px">
       <button class="btn" type="submit">Save</button>
       <a class="btn secondary" href="/admin/metrics">Cancel</a>
