@@ -27,13 +27,21 @@
   </form>
 </div>
 <div class="panel" style="max-width:640px">
-  <h2>Slack alerts</h2>
-  <p class="note">Stale sweep runs Wednesday 8:00 AM Chicago; red-escalation sweep Tuesday 8:00 AM. Channel messages use the webhook; DMs to DRIs need the bot token + each user's Slack member ID (Users page).</p>
+  <div style="display:flex; align-items:center; gap:12px">
+    <h2 style="margin:0">Slack alerts</h2>
+    <span class="chip {{ 'on' if alerts_enabled else 'off' }}">{{ 'ENABLED' if alerts_enabled else 'DISABLED' }}</span>
+    <form method="post" action="/admin/settings/alerts-toggle" style="margin-left:auto">
+      <button class="btn {{ 'danger' if alerts_enabled else '' }} sm">{{ 'Disable alerts' if alerts_enabled else 'Enable alerts' }}</button>
+    </form>
+  </div>
+  <p class="note" style="margin-top:10px">Master switch. While disabled, no Slack message is ever sent (sweeps still mark cells gray on the board). Stale sweep: Wednesday 8:00 AM Chicago. Red-escalation sweep: Tuesday 8:00 AM. Channel posts use the webhook if set, otherwise the bot token + channel ID. DMs to DRIs need the bot token + each user's Slack member ID (Users page).</p>
   <form method="post" action="/admin/settings/slack">
-    <label>Incoming webhook URL (posts to #aprendio)</label>
+    <label>Bot token</label>
+    <input type="password" name="slack_bot_token" value="{{ slack_bot_token }}" placeholder="xoxb-...">
+    <label>Channel ID for team alerts</label>
+    <input type="text" name="slack_channel_id" value="{{ slack_channel_id }}" placeholder="C0123456789">
+    <label>Incoming webhook URL (optional alternative to bot+channel)</label>
     <input type="text" name="slack_webhook_url" value="{{ slack_webhook_url }}" placeholder="https://hooks.slack.com/services/...">
-    <label>Bot token (optional, enables DMs)</label>
-    <input type="text" name="slack_bot_token" value="{{ slack_bot_token }}" placeholder="xoxb-...">
     <div style="margin-top:14px; display:flex; gap:10px">
       <button class="btn" type="submit">Save</button>
       <button class="btn secondary" formaction="/admin/settings/slack-test">Save &amp; send test message</button>

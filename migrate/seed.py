@@ -113,6 +113,22 @@ def main() -> None:
         metric("followers", s_content, "New followers from content", "numeric", 4,
                dri_key="followers")
 
+        # The 7 numbers every founder must know. Ships hidden; enable the
+        # section in admin when ready to track them.
+        s_unit = section("Unit Economics", "chart", 6, enabled=0)
+        metric("cash_collected", s_unit, "Cash collected", "numeric", 1,
+               unit="$", dri_key="revenue")
+        metric("expenses", s_unit, "Expenses", "numeric", 2, unit="$",
+               direction="down", dri_key="revenue")
+        metric("leads", s_unit, "New leads", "numeric", 3, dri_key="sales_activity")
+        metric("conversions", s_unit, "New customers (conversions)", "numeric", 4,
+               dri_key="revenue")
+        metric("cac", s_unit, "Customer acquisition cost", "numeric", 5,
+               rollup="average", unit="$", direction="down", dri_key="revenue")
+        metric("retention", s_unit, "Client retention", "numeric", 6,
+               rollup="average", unit="%", dri_key="revenue")
+        metric("profit", s_unit, "Profit", "numeric", 7, unit="$", dri_key="revenue")
+
         metric("bugs", s_fulfil, "Open bug tickets (all clients)", "numeric", 1,
                rollup="average", direction="down", dri_key="revenue")
         metric("deliverables", s_fulfil, "Deliverables delivered on time", "numeric", 2,
@@ -156,6 +172,11 @@ def main() -> None:
         # ---- display + integration tokens
         display = secrets.token_urlsafe(24)
         dbm.set_setting(con, "display_token", display)
+        if "mrr" in mid:
+            dbm.set_setting(con, "hud_mrr_metric_id", str(mid["mrr"]))
+            dbm.set_setting(con, "mrr_goal", "100000")
+            dbm.set_setting(con, "mrr_milestones",
+                            "37000:$37k Q3;62000:$62k Q4;100000:$100k")
         api_tok = new_api_token(con, "hermes", "read_write", admin_id)
 
         print("\n=== SEED COMPLETE - copy these now, they are not shown again ===")

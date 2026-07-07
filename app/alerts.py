@@ -33,6 +33,23 @@ def post_channel(webhook_url: str, text: str) -> bool:
         return False
 
 
+def post_channel_bot(bot_token: str, channel_id: str, text: str) -> bool:
+    try:
+        r = httpx.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            json={"channel": channel_id, "text": text},
+            timeout=10,
+        )
+        ok = r.status_code == 200 and r.json().get("ok", False)
+        if not ok:
+            log.warning("slack channel post failed: %s", r.text[:200])
+        return ok
+    except httpx.HTTPError as e:
+        log.warning("slack channel post failed: %s", e)
+        return False
+
+
 def post_dm(bot_token: str, member_id: str, text: str) -> bool:
     try:
         r = httpx.post(
@@ -50,9 +67,15 @@ def post_dm(bot_token: str, member_id: str, text: str) -> bool:
         return False
 
 
-def _slack_conf(con: sqlite3.Connection) -> tuple[str | None, str | None]:
+def alerts_enabled(con: sqlite3.Connection) -> bool:
+    """Master switch. Ships OFF; an admin flips it in Settings when ready."""
+    return dbm.get_setting(con, "alerts_enabled", "0") == "1"
+
+
+def _slack_conf(con: sqlite3.Connection) -> tuple[str | None, str | None, str | None]:
     return (dbm.get_setting(con, "slack_webhook_url"),
-            dbm.get_setting(con, "slack_bot_token"))
+            dbm.get_setting(con, "slack_bot_token"),
+            dbm.get_setting(con, "slack_channel_id"))
 
 
 def _record_and_send(con: sqlite3.Connection, metric_id: int, week_key: str,
@@ -64,9 +87,11 @@ def _record_and_send(con: sqlite3.Connection, metric_id: int, week_key: str,
     )
     if cur.rowcount == 0:
         return False  # already alerted
-    webhook, bot = _slack_conf(con)
+    webhook, bot, channel_id = _slack_conf(con)
     if webhook:
         post_channel(webhook, channel_text)
+    elif bot and channel_id:
+        post_channel_bot(bot, channel_id, channel_text)
     if bot and dm_member and dm_text:
         post_dm(bot, dm_member, dm_text)
     return True
@@ -77,6 +102,8 @@ def stale_sweep(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     n = 0
     with dbm.get_db() as con:
+        if not alerts_enabled(con):
+            return 0
         week = wk.last_closed_week(now)
         if now < wk.stale_at(week):
             return 0  # grace not over yet (guard for manual runs)
@@ -110,6 +137,8 @@ def red_sweep(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     n = 0
     with dbm.get_db() as con:
+        if not alerts_enabled(con):
+            return 0
         vm = gridm.build_grid(con, now)
         week = wk.last_closed_week(now)
         dri_slack = {u["id"]: u["slack_member_id"]

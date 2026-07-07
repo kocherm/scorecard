@@ -346,3 +346,121 @@ body.tv .badge-131 { font-size: 11.5px; }
 .tv-foot { display: flex; gap: 22px; margin-top: 4px; font-size: 12.5px; color: var(--silver); align-items: center; }
 .tv-foot .k { display: inline-flex; align-items: center; gap: 6px; }
 .tv-foot .k i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+/* ---------- TV hybrid board (MRR track + act band + heroes + now strip) ---------- */
+.mrrbox { background: var(--navy); border-radius: var(--radius-lg); color: #fff;
+  padding: 16px 22px 26px; margin-bottom: 14px; }
+.mrrbox .mt { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.mrrbox .lbl { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); font-weight: 500; }
+.mrrbox .big { font-size: 42px; font-weight: 600; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; }
+.mrrbox .goal { margin-left: auto; text-align: right; color: rgba(255,255,255,0.6); font-size: 13px; }
+.mrrbox .goal b { color: #fff; font-size: 16px; }
+.track { position: relative; height: 13px; background: rgba(255,255,255,0.12);
+  border-radius: 7px; margin-top: 12px; }
+.track .fill { position: absolute; top: 0; bottom: 0; left: 0;
+  background: linear-gradient(90deg, var(--accent), #F7934C); border-radius: 7px; }
+.track .tick { position: absolute; top: -5px; bottom: -5px; width: 2px;
+  background: rgba(255,255,255,0.35); }
+.track .tick span { position: absolute; top: 24px; left: -30px; width: 72px;
+  text-align: center; font-size: 10.5px; color: rgba(255,255,255,0.55); white-space: nowrap; }
+
+.act-band { background: #fff; border: 1.5px solid rgba(229,62,62,0.35);
+  border-radius: var(--radius-lg); padding: 12px 16px; margin-bottom: 14px; }
+.act-band.clear { border-color: rgba(56,161,105,0.4); }
+.act-band .abt { font-size: 11px; letter-spacing: 0.09em; font-weight: 600;
+  color: var(--red-deep); text-transform: uppercase; margin-bottom: 8px; }
+.act-band .abt.ok { color: var(--green-deep); margin-bottom: 2px; }
+.act-band.clear .ad { font-size: 14px; color: var(--slate); }
+.acards { display: flex; gap: 10px; flex-wrap: wrap; }
+.acard { flex: 1; min-width: 210px; background: rgba(229,62,62,0.06);
+  border-radius: var(--radius-md); padding: 9px 13px; border-left: 4px solid var(--red); }
+.acard.stale-card { background: rgba(148,163,178,0.12); border-left-color: var(--stale); }
+.acard.more { background: var(--ivory); border-left-color: var(--mist); display: flex;
+  flex-direction: column; justify-content: center; }
+.acard .an { font-weight: 600; font-size: 14px; color: var(--ink); margin-top: 3px; }
+.acard .ad { font-size: 12.5px; color: var(--slate); }
+.acard .ad b { color: var(--red-deep); font-weight: 600; }
+.acard.stale-card .ad b { color: var(--silver); }
+.acard .awho { display: flex; align-items: center; gap: 7px; font-size: 12px;
+  color: var(--slate); margin-top: 5px; }
+.avatar { width: 20px; height: 20px; border-radius: 999px; background: var(--navy);
+  color: #fff; font-size: 9.5px; font-weight: 600; display: inline-flex;
+  align-items: center; justify-content: center; flex: none; }
+.btag { font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+  border-radius: 999px; padding: 2px 9px; }
+.btag.r { background: rgba(229,62,62,0.14); color: var(--red-deep); }
+.btag.s { background: rgba(148,163,178,0.22); color: var(--silver); }
+
+.heroes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.hero-tile { background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg);
+  padding: 14px 18px 13px; position: relative; box-shadow: var(--shadow-card); }
+.hero-tile .arrow { position: absolute; top: 13px; right: 16px; font-size: 16px; }
+.hero-tile .arrow.green { color: var(--green); } .hero-tile .arrow.yellow { color: var(--amber); }
+.hero-tile .arrow.red { color: var(--red); } .hero-tile .arrow.stale, .hero-tile .arrow.pending { color: var(--mist); }
+.hero-tile .hn { font-size: 14px; font-weight: 600; color: var(--navy); }
+.hero-tile .hn .star { color: var(--accent); font-size: 13px; }
+.hero-tile .hv { font-size: 40px; font-weight: 600; letter-spacing: -0.02em;
+  line-height: 1.15; font-variant-numeric: tabular-nums; }
+.hero-tile .hv.green { color: var(--green-deep); } .hero-tile .hv.yellow { color: var(--amber-deep); }
+.hero-tile .hv.red { color: var(--red-deep); }
+.hero-tile .hv.stale, .hero-tile .hv.pending, .hero-tile .hv.no-target { color: var(--silver); font-size: 30px; }
+.hero-tile .ht { font-size: 12px; color: var(--silver); }
+.hero-tile .meter { height: 7px; border-radius: 4px; background: var(--pearl);
+  margin-top: 9px; overflow: hidden; }
+.hero-tile .meter i { display: block; height: 100%; border-radius: 4px; background: var(--mist); }
+.hero-tile .meter i.green { background: var(--green); } .hero-tile .meter i.yellow { background: var(--amber); }
+.hero-tile .meter i.red { background: var(--red); }
+
+.tv-cols { display: grid; grid-template-columns: 1fr 300px; gap: 14px; align-items: start; }
+.nowcard { margin-bottom: 0; }
+table.now { border-collapse: collapse; width: 100%; }
+table.now th { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; text-align: center; padding: 9px 8px;
+  border-bottom: 1px solid var(--pearl); }
+table.now th:first-child { text-align: left; padding-left: 18px; }
+table.now td { padding: 8px; text-align: center; border-bottom: 1px solid var(--pearl); }
+table.now tr:last-child td { border-bottom: none; }
+table.now td.m { text-align: left; padding-left: 18px; }
+table.now td.m { display: flex; align-items: center; gap: 9px; }
+table.now td.m .nm { font-weight: 500; font-size: 14px; }
+table.now td.m .who { font-size: 11px; color: var(--silver); margin-left: auto; padding-right: 8px; }
+table.now .secrow td { background: var(--ivory); font-size: 10.5px; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--silver); font-weight: 500; text-align: left;
+  padding: 4px 18px; display: table-cell; }
+.chip2 { display: inline-block; min-width: 54px; padding: 4px 10px;
+  border-radius: var(--radius-md); font-weight: 600; font-size: 14px;
+  font-variant-numeric: tabular-nums; }
+.chip2.green { background: var(--green); color: #fff; }
+.chip2.yellow { background: var(--amber); color: #fff; }
+.chip2.red { background: var(--red); color: #fff; }
+.chip2.stale { background: var(--mist); color: #fff; }
+.chip2.no-target { background: var(--pearl); color: var(--slate); }
+.chip2.pending { background: var(--pearl); color: var(--silver); }
+.chip2.faint { opacity: 0.5; }
+.chip2.empty { background: #fff; border: 1.5px dashed var(--mist); color: var(--mist); font-weight: 400; }
+table.now .tgt { color: var(--slate); font-size: 13px; font-variant-numeric: tabular-nums; }
+.bars { display: inline-flex; align-items: flex-end; gap: 3px; height: 24px; }
+.bars i { width: 8px; border-radius: 2px 2px 0 0; display: inline-block; }
+.bars i.green { background: var(--green); } .bars i.yellow { background: var(--amber); }
+.bars i.red { background: var(--red); }
+.bars i.stale, .bars i.pending, .bars i.s2 { background: var(--mist); height: 5px; }
+
+.clientcard { padding: 12px 16px; margin-bottom: 0; }
+.clientcard .cht { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; margin-bottom: 8px; }
+.clientcard .crow { display: flex; align-items: center; gap: 10px; padding: 7px 0;
+  border-bottom: 1px solid var(--pearl); font-size: 14px; }
+.clientcard .crow:last-child { border-bottom: none; }
+.clientcard .cn { font-weight: 500; }
+.clientcard .cs { margin-left: auto; font-weight: 600; font-size: 12.5px; }
+.clientcard .cs.green { color: var(--green-deep); } .clientcard .cs.yellow { color: var(--amber-deep); }
+.clientcard .cs.red { color: var(--red-deep); } .clientcard .cs.stale { color: var(--silver); }
+
+body.tv .mrrbox .big { font-size: 48px; }
+body.tv .hero-tile .hv { font-size: 46px; }
+body.tv .acard .an { font-size: 15.5px; }
+body.tv table.now td.m .nm { font-size: 15px; }
+body.tv .chip2 { font-size: 15px; }
+@media (max-width: 1100px) { .tv-cols { grid-template-columns: 1fr; } .heroes { grid-template-columns: 1fr; } }

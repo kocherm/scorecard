@@ -244,8 +244,8 @@ def display_page(request: Request, token: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
     now = datetime.now(timezone.utc)
-    vm = gridm.build_grid(con, now)
-    return render(request, "display.html", vm=vm, token=token,
+    tv = gridm.build_tv(con, now)
+    return render(request, "display.html", tv=tv, token=token,
                   rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
 
 
@@ -254,9 +254,9 @@ def display_body(request: Request, token: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
     now = datetime.now(timezone.utc)
-    vm = gridm.build_grid(con, now)
+    tv = gridm.build_tv(con, now)
     html = templates.env.get_template("_display_body.html").render(
-        vm=vm, rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
+        tv=tv, rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
     return HTMLResponse(f'<main class="page" id="tvroot">{html}</main>')
 
 
@@ -510,6 +510,8 @@ def admin_settings(request: Request, user=Depends(require_admin),
                   display_token=dbm.get_setting(con, "display_token"),
                   slack_webhook_url=dbm.get_setting(con, "slack_webhook_url") or "",
                   slack_bot_token=dbm.get_setting(con, "slack_bot_token") or "",
+                  slack_channel_id=dbm.get_setting(con, "slack_channel_id") or "",
+                  alerts_enabled=dbm.get_setting(con, "alerts_enabled", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
                   base_url=str(request.base_url).rstrip("/"))
 
@@ -528,21 +530,36 @@ def rotate_display_token(user=Depends(require_admin),
     return RedirectResponse("/admin/settings", status_code=303)
 
 
+@app.post("/admin/settings/alerts-toggle")
+def alerts_toggle(user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    cur = dbm.get_setting(con, "alerts_enabled", "0")
+    dbm.set_setting(con, "alerts_enabled", "0" if cur == "1" else "1")
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+def _save_slack_settings(con, webhook: str, bot: str, channel: str) -> None:
+    dbm.set_setting(con, "slack_webhook_url", webhook.strip())
+    dbm.set_setting(con, "slack_bot_token", bot.strip())
+    dbm.set_setting(con, "slack_channel_id", channel.strip())
+
+
 @app.post("/admin/settings/slack")
 def save_slack(slack_webhook_url: str = Form(""), slack_bot_token: str = Form(""),
+               slack_channel_id: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    dbm.set_setting(con, "slack_webhook_url", slack_webhook_url.strip())
-    dbm.set_setting(con, "slack_bot_token", slack_bot_token.strip())
+    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id)
     return RedirectResponse("/admin/settings", status_code=303)
 
 
 @app.post("/admin/settings/slack-test")
 def slack_test(slack_webhook_url: str = Form(""), slack_bot_token: str = Form(""),
+               slack_channel_id: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    dbm.set_setting(con, "slack_webhook_url", slack_webhook_url.strip())
-    dbm.set_setting(con, "slack_bot_token", slack_bot_token.strip())
+    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id)
     con.commit()
+    msg = "Aprendio Scorecard: test message. Alerts are wired up."
     if slack_webhook_url.strip():
-        alerts.post_channel(slack_webhook_url.strip(),
-                            "Aprendio Scorecard: test message. Alerts are wired up.")
+        alerts.post_channel(slack_webhook_url.strip(), msg)
+    elif slack_bot_token.strip() and slack_channel_id.strip():
+        alerts.post_channel_bot(slack_bot_token.strip(), slack_channel_id.strip(), msg)
     return RedirectResponse("/admin/settings", status_code=303)

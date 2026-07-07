@@ -256,3 +256,202 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                   last_closed=wk.last_closed_week(now, tz),
                   sections=section_vms, quarter_label=wk.quarter_label(cur_week),
                   summary=summary)
+
+
+# ---------------------------------------------------------------- TV view model
+@dataclass
+class ActionItem:
+    kind: str        # 'red' | 'stale'
+    badge: str       # 'RED - WEEK 2' / 'NOT UPDATED'
+    name: str
+    value_display: str
+    target_display: str
+    dri_name: str
+    initials: str
+    next_step: str
+
+
+@dataclass
+class Hero:
+    name: str
+    dri_name: str
+    value_display: str
+    target_display: str
+    pct: Optional[int]   # % of target, clamped 0..120; None if unknowable
+    state: str
+    arrow: str           # 'up' | 'down' | 'flat' | 'none'
+    week_note: str       # 'this week' | 'last week' | 'no data yet'
+
+
+@dataclass
+class StripRow:
+    name: str
+    dri_name: str
+    dot: str
+    is_key: bool
+    last_display: str
+    last_state: str
+    cur_display: str
+    cur_state: str
+    target_display: str
+    spark: list
+    section: str
+
+
+@dataclass
+class MrrHud:
+    value: float
+    value_display: str
+    pace_display: str
+    goal: float
+    goal_display: str
+    fill_pct: float
+    milestones: list  # [{pct, label}]
+
+
+@dataclass
+class TvVM:
+    vm: GridVM
+    mrr: Optional[MrrHud]
+    heroes: list
+    strip: list
+    clients: list  # [{name, state, note}]
+    actions: list
+    more_actions: int
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in name.split() if p]
+    return (parts[0][0] + (parts[1][0] if len(parts) > 1 else "")).upper() if parts else "?"
+
+
+def _ratio_pct(value: float, target: Optional[float], direction: str) -> Optional[int]:
+    if target is None or target <= 0:
+        return None
+    if direction == "down":
+        r = 1.0 if value <= target else target / value
+    else:
+        r = value / target
+    return int(round(max(0.0, min(1.2, r)) * 100))
+
+
+NEXT_STEP = {
+    1: "file a 1-3-1 before the weekly sync",
+    2: "15-min 1:1 with Michael this week",
+    3: "structural conversation - 3+ weeks red",
+}
+
+
+def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
+    from .db import get_setting
+    vm = build_grid(con, now)
+    heroes, strip, clients, actions = [], [], [], []
+
+    def find_cell(row: Row, week: date) -> Optional[Cell]:
+        return next((c for c in row.cells if c.week == week), None)
+
+    targets_by_metric: dict[int, Optional[float]] = {}
+    for t in con.execute("SELECT metric_id, year, quarter, baseline_value, stretch_value FROM targets"):
+        y, q = wk.quarter_of(vm.current_week)
+        if t["year"] == y and t["quarter"] == q:
+            targets_by_metric[t["metric_id"]] = sc.target_for_week(
+                vm.current_week,
+                sc.QuarterTargets(t["baseline_value"], t["stretch_value"]))
+
+    for section in vm.sections:
+        for row in section.rows:
+            cur = find_cell(row, vm.current_week)
+            closed = find_cell(row, vm.last_closed)
+
+            if row.metric_type == "status":
+                st = row.last_state if row.last_state in ("green", "yellow", "red") else "stale"
+                note = ""
+                if row.red_streak >= 2:
+                    note = f"week {row.red_streak}"
+                clients.append({"name": row.name, "state": st, "note": note})
+            elif row.is_key:
+                # Prefer this week's number; fall back to last week's.
+                use, week_note = (cur, "this week")
+                if cur is None or cur.raw is None:
+                    use, week_note = (closed, "last week")
+                val = use.raw if use and use.raw is not None else None
+                tgt = targets_by_metric.get(row.metric_id)
+                pct = _ratio_pct(float(val), tgt, row.direction) if val is not None else None
+                nums = [s["value"] for s in row.spark if s["value"] is not None]
+                if val is not None:
+                    nums = nums + [float(val)] if week_note == "this week" else nums
+                arrow = "none"
+                if len(nums) >= 2:
+                    arrow = "up" if nums[-1] > nums[-2] else ("down" if nums[-1] < nums[-2] else "flat")
+                heroes.append(Hero(
+                    name=row.name, dri_name=row.dri_name,
+                    value_display=(use.display if use and use.display else "-"),
+                    target_display=row.target_display,
+                    pct=pct,
+                    state=(use.state.value if use and use.raw is not None else
+                           (closed.state.value if closed else "pending")),
+                    arrow=arrow,
+                    week_note=(week_note if val is not None else "no data yet")))
+            else:
+                strip.append(StripRow(
+                    name=row.name, dri_name=row.dri_name, dot=row.last_state,
+                    is_key=False,
+                    last_display=(closed.display if closed and closed.display else "-"),
+                    last_state=(closed.state.value if closed else "pending"),
+                    cur_display=(cur.display if cur and cur.display else ""),
+                    cur_state=(cur.state.value if cur else "pending"),
+                    target_display=row.target_display, spark=row.spark,
+                    section=section.name))
+
+            if row.red_streak >= 1:
+                lvl = min(row.red_streak, 3)
+                step = NEXT_STEP[lvl]
+                if lvl == 1 and row.has_131:
+                    step = "1-3-1 filed - review in sync"
+                actions.append(ActionItem(
+                    kind="red", badge=f"RED - WEEK {row.red_streak}",
+                    name=row.name,
+                    value_display=(closed.display if closed and closed.display else "R"),
+                    target_display=row.target_display,
+                    dri_name=row.dri_name, initials=_initials(row.dri_name),
+                    next_step=step))
+            elif row.last_state == "stale":
+                actions.append(ActionItem(
+                    kind="stale", badge="NOT UPDATED",
+                    name=row.name, value_display="-",
+                    target_display=row.target_display,
+                    dri_name=row.dri_name, initials=_initials(row.dri_name),
+                    next_step="enter last week's number"))
+
+    actions.sort(key=lambda a: (a.kind != "red", a.name))
+    more = max(0, len(actions) - 4)
+
+    mrr = None
+    mid_s = get_setting(con, "hud_mrr_metric_id")
+    if mid_s:
+        try:
+            goal = float(get_setting(con, "mrr_goal", "100000"))
+            row_e = con.execute(
+                """SELECT value_numeric FROM entries WHERE metric_id = ?
+                   AND value_numeric IS NOT NULL ORDER BY week_start DESC LIMIT 1""",
+                (int(mid_s),)).fetchone()
+            if row_e:
+                val = row_e["value_numeric"]
+                pace = targets_by_metric.get(int(mid_s))
+                miles = []
+                for part in (get_setting(con, "mrr_milestones", "") or "").split(";"):
+                    if ":" in part:
+                        amt, label = part.split(":", 1)
+                        miles.append({"pct": min(99.0, float(amt) / goal * 100),
+                                      "label": label.strip()})
+                mrr = MrrHud(
+                    value=val, value_display=fmt_value("numeric", "$", val),
+                    pace_display=(fmt_value("numeric", "$", pace) if pace else "-"),
+                    goal=goal, goal_display=fmt_value("numeric", "$", goal),
+                    fill_pct=max(3.0, min(100.0, val / goal * 100)),
+                    milestones=miles)
+        except (TypeError, ValueError):
+            mrr = None
+
+    return TvVM(vm=vm, mrr=mrr, heroes=heroes, strip=strip, clients=clients,
+                actions=actions[:4], more_actions=more)
