@@ -12,7 +12,7 @@
 {% from "_icons.html" import icon %}
 {% block chrome %}
 <aside class="sidenav">
-  <a class="logo" href="/" title="Aprendio Scorecard"><img src="/static/logo-dark.svg" alt="Aprendio"></a>
+  <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio"></a>
   <nav>
     <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
     {% if user and user['role'] == 'admin' %}
@@ -35,5 +35,6 @@
 {% block content %}{% endblock %}
 </main>
 {% block fab %}{% endblock %}
+{% include "_about.html" %}
 </body>
 </html>

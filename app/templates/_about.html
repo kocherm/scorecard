@@ -1,0 +1,21 @@
+<dialog id="about-aprendio" class="about">
+  <button class="about-close" onclick="document.getElementById('about-aprendio').close()" title="Close" aria-label="Close">&times;</button>
+  <div class="about-head">
+    <img src="/static/logo.svg" alt="Aprendio" class="about-logo">
+    <div>
+      <div class="about-name">Aprendio</div>
+      <div class="about-tag">The Automation Authority</div>
+    </div>
+  </div>
+  <div class="about-body">
+    Need automation? Visit <a href="https://aprendio.ai" target="_blank" rel="noopener">aprendio.ai</a>
+    or message <a href="https://instagram.com/michaelpkocher" target="_blank" rel="noopener">michaelpkocher</a> on Instagram.
+  </div>
+</dialog>
+<script>
+function openAbout(e) { e.preventDefault(); document.getElementById('about-aprendio').showModal(); }
+document.addEventListener('click', function (e) {
+  var d = document.getElementById('about-aprendio');
+  if (d.open && e.target === d) d.close();  /* click on backdrop closes */
+});
+</script>
