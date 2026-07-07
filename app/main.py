@@ -55,6 +55,15 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(alerts.red_sweep, CronTrigger(
         day_of_week="tue", hour=8, minute=0, timezone="America/Chicago"),
         id="red_sweep", replace_existing=True)
+
+    def prune_sessions():
+        with dbm.get_db() as con:
+            con.execute("DELETE FROM sessions WHERE expires_at < ?",
+                        (datetime.now(timezone.utc).isoformat(),))
+
+    scheduler.add_job(prune_sessions, CronTrigger(
+        day_of_week="sun", hour=3, minute=0, timezone="America/Chicago"),
+        id="prune_sessions", replace_existing=True)
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -83,13 +92,37 @@ def login_page(request: Request):
     return render(request, "login.html", error=None)
 
 
+# Simple in-memory login throttle: 5 failures per identity per 15 minutes.
+_login_failures: dict[str, list[float]] = {}
+_LOCKOUT_N, _LOCKOUT_WINDOW = 5, 900.0
+
+
+def _throttled(key: str) -> bool:
+    import time
+    now = time.monotonic()
+    hits = [t for t in _login_failures.get(key, []) if now - t < _LOCKOUT_WINDOW]
+    _login_failures[key] = hits
+    return len(hits) >= _LOCKOUT_N
+
+
+def _record_failure(key: str) -> None:
+    import time
+    _login_failures.setdefault(key, []).append(time.monotonic())
+
+
 @app.post("/login")
 def login(request: Request, email: str = Form(...), password: str = Form(...),
           con: sqlite3.Connection = Depends(db_dep)):
+    key = f"{(request.client.host if request.client else '?')}:{email.strip().lower()}"
+    if _throttled(key):
+        return render(request, "login.html",
+                      error="Too many attempts. Wait 15 minutes and try again.")
     row = con.execute("SELECT * FROM users WHERE email = ? AND is_active = 1",
                       (email.strip(),)).fetchone()
     if row is None or not verify_password(password, row["password_hash"]):
+        _record_failure(key)
         return render(request, "login.html", error="Wrong email or password.")
+    _login_failures.pop(key, None)
     token = create_session(con, row["id"])
     dest = "/account" if row["must_change_password"] else "/"
     resp = RedirectResponse(dest, status_code=303)
