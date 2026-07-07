@@ -1,0 +1,32 @@
+{% macro summary_strip(vm) %}
+<div class="summary">
+  <div class="stat green">
+    <div class="n">{{ vm.summary.green }}</div>
+    <div class="l"><i style="background:var(--green)"></i> On target</div>
+  </div>
+  <div class="stat yellow">
+    <div class="n">{{ vm.summary.yellow }}</div>
+    <div class="l"><i style="background:var(--amber)"></i> 70-99%</div>
+  </div>
+  <div class="stat red">
+    <div class="n">{{ vm.summary.red }}</div>
+    <div class="l"><i style="background:var(--red)"></i> Below 70%</div>
+  </div>
+  <div class="stat stale">
+    <div class="n">{{ vm.summary.stale }}</div>
+    <div class="l"><i style="background:var(--stale)"></i> Not updated</div>
+  </div>
+  <div class="stat attention">
+    <div class="t">Last closed week &middot; {{ vm.last_closed | qlabel }} ({{ vm.last_closed.strftime('%b %-d') }})</div>
+    <div class="names">
+      {% if vm.summary.red_names %}<b>Red:</b> {{ vm.summary.red_names | join(', ') }}{% endif %}
+      {% if vm.summary.red_names and vm.summary.stale_names %} &nbsp;&middot;&nbsp; {% endif %}
+      {% if vm.summary.stale_names %}<span class="gray">Missing: {{ vm.summary.stale_names | join(', ') }}</span>{% endif %}
+      {% if not vm.summary.red_names and not vm.summary.stale_names %}
+        {% if vm.summary.pending %}<span class="gray">{{ vm.summary.pending }} metric{{ 's' if vm.summary.pending != 1 }} awaiting last week's entry (due Monday EOD, gray Wednesday 8am).</span>
+        {% else %}All metrics updated and none red. Keep going.{% endif %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endmacro %}

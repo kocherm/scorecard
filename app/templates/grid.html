@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_grid_table.html" import grid_tables %}
+{% from "_summary.html" import summary_strip %}
 {% block title %}Scorecard{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -10,5 +11,6 @@
     {% else %}Read-only view.{% endif %}
   </p>
 </div>
+{{ summary_strip(vm) }}
 {{ grid_tables(vm, editable=can_edit) }}
 {% endblock %}

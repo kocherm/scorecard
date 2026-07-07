@@ -146,8 +146,9 @@ def _render_cell(request: Request, con: sqlite3.Connection, metric_id: int,
                 for c in r.cells:
                     if c.week == week:
                         html = templates.env.from_string(
-                            '{% from "_cell.html" import cell_td %}{{ cell_td(row, cell, true) }}'
-                        ).render(row=r, cell=c)
+                            '{% from "_cell.html" import cell_td %}'
+                            '{{ cell_td(row, cell, true, last_closed) }}'
+                        ).render(row=r, cell=c, last_closed=vm.last_closed)
                         return HTMLResponse(html)
     raise HTTPException(404)
 

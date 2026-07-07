@@ -24,6 +24,7 @@ class Cell:
 @dataclass
 class Row:
     metric_id: int
+    last_state: str  # cell state of the last closed week, for the row dot
     name: str
     metric_type: str
     rollup: Optional[str]
@@ -51,12 +52,26 @@ class SectionVM:
 
 
 @dataclass
+class Summary:
+    green: int = 0
+    yellow: int = 0
+    red: int = 0
+    stale: int = 0
+    pending: int = 0
+    other: int = 0
+    red_names: list[str] = field(default_factory=list)
+    stale_names: list[str] = field(default_factory=list)
+
+
+@dataclass
 class GridVM:
     weeks: list[date]
     bands: list[wk.MonthBand]
     current_week: date
+    last_closed: date
     sections: list[SectionVM]
     quarter_label: str
+    summary: Summary
 
 
 def fmt_value(metric_type: str, unit: Optional[str], value) -> str:
@@ -133,6 +148,7 @@ def build_grid(con: sqlite3.Connection, now: datetime,
         y, q = wk.quarter_of(w)
         return sc.target_for_week(w, targets.get((mid, y, q)))
 
+    summary = Summary()
     section_vms: list[SectionVM] = []
     for s in sections:
         vm = SectionVM(id=s["id"], name=s["name"], icon=s["icon"] or "chart")
@@ -188,9 +204,27 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                 actual_raw = (closed_entry.value_status if m["metric_type"] == "status"
                               else closed_entry.value_numeric)
 
+            closed_state = sc.cell_state(info, closed, closed_entry,
+                                         target_for(m["id"], closed), now, tz)
+            if closed_state == sc.CellState.GREEN:
+                summary.green += 1
+            elif closed_state == sc.CellState.YELLOW:
+                summary.yellow += 1
+            elif closed_state == sc.CellState.RED:
+                summary.red += 1
+                summary.red_names.append(m["name"])
+            elif closed_state == sc.CellState.STALE:
+                summary.stale += 1
+                summary.stale_names.append(m["name"])
+            elif closed_state == sc.CellState.PENDING:
+                summary.pending += 1
+            else:
+                summary.other += 1
+
             has_131 = (m["id"], closed.isoformat()) in otos
             vm.rows.append(Row(
-                metric_id=m["id"], name=m["name"], metric_type=m["metric_type"],
+                metric_id=m["id"], last_state=closed_state.value,
+                name=m["name"], metric_type=m["metric_type"],
                 rollup=m["rollup"], direction=m["direction"], unit=m["unit"],
                 dri_name=m["dri_name"] or "-", dri_user_id=m["dri_user_id"],
                 cells=cells, band_subtotals=band_subs,
@@ -205,4 +239,6 @@ def build_grid(con: sqlite3.Connection, now: datetime,
         section_vms.append(vm)
 
     return GridVM(weeks=weeks, bands=bands, current_week=cur_week,
-                  sections=section_vms, quarter_label=wk.quarter_label(cur_week))
+                  last_closed=wk.last_closed_week(now, tz),
+                  sections=section_vms, quarter_label=wk.quarter_label(cur_week),
+                  summary=summary)

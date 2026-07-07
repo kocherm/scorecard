@@ -24,7 +24,7 @@
         <tr>
           {% for band in vm.bands %}
             {% for w in band.weeks %}
-            <th class="wk {% if w == vm.current_week %}current{% endif %}">
+            <th class="wk {% if w == vm.current_week %}current{% elif w >= vm.last_closed %}hot{% endif %}">
               {{ w | qlabel }}
               <span class="d">{{ w.strftime('%b %-d') }}</span>
             </th>
@@ -37,7 +37,9 @@
         {% for row in section.rows %}
         <tr>
           <td class="metric-cell">
-            <div class="mname">{{ row.name }}
+            <div class="mrow">
+              <span class="dot {{ row.last_state }}"></span>
+              <span class="mname">{{ row.name }}</span>
               {% if row.escalation >= 1 %}
                 {% if editable %}
                 <a class="badge-131 {% if row.has_131 %}filed{% endif %}"
@@ -54,11 +56,11 @@
           {% set cell_i = namespace(v=0) %}
           {% for band in vm.bands %}
             {% for w in band.weeks %}
-              {{ cell_td(row, row.cells[cell_i.v], editable) }}
+              {{ cell_td(row, row.cells[cell_i.v], editable, vm.last_closed) }}
               {% set cell_i.v = cell_i.v + 1 %}
             {% endfor %}
             {% set sub = row.band_subtotals[loop.index0] %}
-            <td class="subtotal">{{ sub if sub is not none else '-' }}</td>
+            <td class="subtotal">{{ sub if sub is not none else '' }}</td>
           {% endfor %}
           <td class="pin target">{{ row.target_display }}</td>
           <td class="pin actual">{{ row.actual_display }}</td>

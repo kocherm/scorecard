@@ -1,10 +1,18 @@
-{% macro cell_td(row, cell, editable) %}
+{% macro cell_td(row, cell, editable, last_closed) %}
 <td id="cell-{{ row.metric_id }}-{{ cell.week.isoformat() }}"
-    class="cell {{ cell.state.value }} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
+    class="cell {% if cell.week >= last_closed %}hot{% endif %} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
     {% if editable and cell.editable %}
     hx-get="/cell/{{ row.metric_id }}/{{ cell.week.isoformat() }}/edit"
     hx-target="this" hx-swap="outerHTML"
     {% endif %}>
-  {%- if cell.display %}{{ cell.display }}{% elif cell.state.value == 'stale' %}&mdash;{% endif -%}
+  {%- if cell.state.value == 'na' -%}
+  {%- elif cell.state.value == 'pending' -%}
+    {%- if cell.is_current and editable -%}<span class="vchip pending">+</span>
+    {%- elif cell.is_current -%}<span class="vchip pending">&middot;</span>{%- endif -%}
+  {%- elif cell.state.value == 'stale' -%}
+    <span class="vchip stale">&mdash;</span>
+  {%- else -%}
+    <span class="vchip {{ cell.state.value }}">{{ cell.display }}</span>
+  {%- endif -%}
 </td>
 {% endmacro %}

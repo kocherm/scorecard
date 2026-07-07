@@ -1,4 +1,5 @@
 {% from "_grid_table.html" import grid_tables %}
+{% from "_summary.html" import summary_strip %}
 <div class="tv-head">
   <span class="seam"></span>
   <span class="wordmark">APRENDIO</span>
@@ -7,11 +8,12 @@
   <span class="qweek">{{ vm.quarter_label }}</span>
   <span class="clock">week of {{ vm.current_week.strftime('%b %-d') }} &middot; updated {{ rendered_at }}</span>
 </div>
+{{ summary_strip(vm) }}
 {{ grid_tables(vm, editable=false) }}
 <div class="tv-foot">
-  <span class="k"><i style="background:rgba(56,161,105,0.7)"></i> on target</span>
-  <span class="k"><i style="background:rgba(214,158,46,0.7)"></i> 70-99%</span>
-  <span class="k"><i style="background:rgba(229,62,62,0.7)"></i> below 70%</span>
-  <span class="k"><i style="background:rgba(148,163,178,0.6)"></i> not updated</span>
+  <span class="k"><i style="background:var(--green)"></i> on target</span>
+  <span class="k"><i style="background:var(--amber)"></i> 70-99%</span>
+  <span class="k"><i style="background:var(--red)"></i> below 70%</span>
+  <span class="k"><i style="background:var(--mist)"></i> not updated</span>
   <span class="k">green &ge; 100% of target &middot; weeks run Mon-Sun &middot; entries due Monday EOD</span>
 </div>
