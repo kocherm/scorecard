@@ -307,7 +307,7 @@ body.login-page {
 .login-card .btn { width: 100%; margin-top: 18px; }
 
 /* ---------- TV display: same light system, scaled for distance ---------- */
-body.tv { background: var(--warm-white); cursor: none; font-size: 17px; }
+body.tv { background: var(--warm-white); font-size: 17px; }
 body.tv .page { max-width: none; padding: 18px 26px; }
 .tv-head {
   display: flex; align-items: center; gap: 14px;
