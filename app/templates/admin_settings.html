@@ -25,6 +25,17 @@
       </select></div>
     <button class="btn" type="submit">Save</button>
   </form>
+  <h3>TV views in rotation</h3>
+  <p class="note">The prev/next buttons on the display cycle through the checked views.</p>
+  <form method="post" action="/admin/settings/display-views">
+    {% for vid, vlabel in all_views %}
+    <label style="display:flex; align-items:center; gap:8px; margin:6px 0">
+      <input type="checkbox" name="views" value="{{ vid }}" {% if vid in enabled_views %}checked{% endif %} style="width:auto">
+      {{ vlabel }}
+    </label>
+    {% endfor %}
+    <button class="btn" type="submit" style="margin-top:10px">Save views</button>
+  </form>
 </div>
 <div class="panel" style="max-width:640px">
   <div style="display:flex; align-items:center; gap:12px">

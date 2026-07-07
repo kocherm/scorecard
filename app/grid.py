@@ -289,10 +289,15 @@ class StripRow:
     dri_name: str
     dot: str
     is_key: bool
+    metric_type: str
     last_display: str
     last_state: str
     cur_display: str
     cur_state: str
+    latest_display: str   # this week if entered, else last week (for tiles)
+    latest_state: str
+    week_note: str        # 'this week' | 'last week' | ''
+    pct: Optional[int]    # % of current target for meters; None if unknowable
     target_display: str
     spark: list
     section: str
@@ -314,10 +319,13 @@ class TvVM:
     vm: GridVM
     mrr: Optional[MrrHud]
     heroes: list
-    strip: list
+    strip: list    # every metric incl. key and status rows; views filter
     clients: list  # [{name, state, note}]
     actions: list
     more_actions: int
+    view: str = "hybrid"
+    prev_view: Optional[str] = None
+    next_view: Optional[str] = None
 
 
 def _initials(name: str) -> str:
@@ -369,7 +377,7 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 if row.red_streak >= 2:
                     note = f"week {row.red_streak}"
                 clients.append({"name": row.name, "state": st, "note": note})
-            elif row.is_key:
+            if row.metric_type != "status" and row.is_key:
                 # Prefer this week's number; fall back to last week's.
                 use, week_note = (cur, "this week")
                 if cur is None or cur.raw is None:
@@ -392,16 +400,30 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                            (closed.state.value if closed else "pending")),
                     arrow=arrow,
                     week_note=(week_note if val is not None else "no data yet")))
+
+            use, wnote = (cur, "this week")
+            if cur is None or cur.raw is None:
+                use, wnote = (closed, "last week")
+            latest_raw = use.raw if use and use.raw is not None else None
+            if row.metric_type == "numeric" and latest_raw is not None:
+                row_pct = _ratio_pct(float(latest_raw),
+                                     targets_by_metric.get(row.metric_id), row.direction)
             else:
-                strip.append(StripRow(
-                    name=row.name, dri_name=row.dri_name, dot=row.last_state,
-                    is_key=False,
-                    last_display=(closed.display if closed and closed.display else "-"),
-                    last_state=(closed.state.value if closed else "pending"),
-                    cur_display=(cur.display if cur and cur.display else ""),
-                    cur_state=(cur.state.value if cur else "pending"),
-                    target_display=row.target_display, spark=row.spark,
-                    section=section.name))
+                row_pct = None
+            strip.append(StripRow(
+                name=row.name, dri_name=row.dri_name, dot=row.last_state,
+                is_key=row.is_key, metric_type=row.metric_type,
+                last_display=(closed.display if closed and closed.display else "-"),
+                last_state=(closed.state.value if closed else "pending"),
+                cur_display=(cur.display if cur and cur.display else ""),
+                cur_state=(cur.state.value if cur else "pending"),
+                latest_display=(use.display if use and use.display else "-"),
+                latest_state=(use.state.value if use and use.raw is not None else
+                              (closed.state.value if closed else "pending")),
+                week_note=(wnote if latest_raw is not None else ""),
+                pct=row_pct,
+                target_display=row.target_display, spark=row.spark,
+                section=section.name))
 
             if row.red_streak >= 1:
                 lvl = min(row.red_streak, 3)

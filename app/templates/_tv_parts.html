@@ -1,0 +1,102 @@
+{% macro tv_header(tv, rendered_at) %}
+<div class="tv-head">
+  <span class="seam"></span>
+  <span class="wordmark">APRENDIO</span>
+  <span class="title">Company Scorecard</span>
+  <div class="spacer"></div>
+  <span class="qweek">{{ tv.vm.quarter_label }}</span>
+  <span class="clock">week of {{ tv.vm.current_week.strftime('%b %-d') }} &middot; updated {{ rendered_at }}</span>
+</div>
+{% endmacro %}
+
+{% macro mrr_track(tv) %}
+{% if tv.mrr %}
+<div class="mrrbox">
+  <div class="mt">
+    <span class="lbl">Monthly recurring revenue</span>
+    <span class="big">{{ tv.mrr.value_display }}</span>
+    <span class="goal">pace target {{ tv.mrr.pace_display }} &middot; <b>goal {{ tv.mrr.goal_display }}</b></span>
+  </div>
+  <div class="track">
+    <span class="fill" style="width:{{ tv.mrr.fill_pct }}%"></span>
+    {% for m in tv.mrr.milestones %}
+    <span class="tick" style="left:{{ m.pct }}%"><span>{{ m.label }}</span></span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro act_band(tv) %}
+{% if tv.actions %}
+<div class="act-band">
+  <div class="abt">Act on this &middot; {{ tv.actions|length + tv.more_actions }} item{{ 's' if (tv.actions|length + tv.more_actions) != 1 }}</div>
+  <div class="acards">
+    {% for a in tv.actions %}
+    <div class="acard {{ 'stale-card' if a.kind == 'stale' }}">
+      <div class="atop"><span class="btag {{ 'r' if a.kind == 'red' else 's' }}">{{ a.badge }}</span></div>
+      <div class="an">{{ a.name }}</div>
+      <div class="ad"><b>{{ a.value_display }}</b>{% if a.target_display != '-' %} vs {{ a.target_display }}{% endif %}</div>
+      <div class="awho"><span class="avatar">{{ a.initials }}</span> {{ a.dri_name }} &middot; {{ a.next_step }}</div>
+    </div>
+    {% endfor %}
+    {% if tv.more_actions %}<div class="acard more"><div class="an">+{{ tv.more_actions }} more</div><div class="ad">see edit mode</div></div>{% endif %}
+  </div>
+</div>
+{% else %}
+<div class="act-band clear">
+  <div class="abt ok">Nothing needs acting on</div>
+  <div class="ad">All metrics updated, none red. Keep going.</div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro hero_tiles(tv) %}
+{% if tv.heroes %}
+<div class="heroes">
+  {% for h in tv.heroes %}
+  <div class="hero-tile">
+    <span class="arrow {{ h.state }}">{% if h.arrow == 'up' %}&#9650;{% elif h.arrow == 'down' %}&#9660;{% elif h.arrow == 'flat' %}&#9654;{% endif %}</span>
+    <div class="hn"><span class="star">&#9733;</span> {{ h.name }}</div>
+    <div class="hv {{ h.state }}">{{ h.value_display }}</div>
+    <div class="ht">{{ h.week_note }}{% if h.target_display != '-' %} &middot; target {{ h.target_display }}{% endif %} &middot; {{ h.dri_name }}</div>
+    <div class="meter"><i class="{{ h.state }}" style="width:{{ h.pct if h.pct is not none else 0 }}%"></i></div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro now_table(tv, include_key=false, include_status=false) %}
+<div class="card nowcard">
+  <table class="now">
+    <tr><th>Metric</th><th>Last wk</th><th>This wk</th><th>Target</th><th>Trend</th></tr>
+    {% set cur_section = namespace(v='') %}
+    {% for r in tv.strip if (include_key or not r.is_key) and (include_status or r.metric_type != 'status') %}
+    {% if r.section != cur_section.v %}
+    <tr class="secrow"><td colspan="5">{{ r.section }}</td></tr>
+    {% set cur_section.v = r.section %}
+    {% endif %}
+    <tr>
+      <td class="m"><span class="dot {{ r.dot }}"></span><span class="nm {% if r.is_key %}key{% endif %}">{{ r.name }}{% if r.is_key %} <span class="star">&#9733;</span>{% endif %}</span><span class="who">{{ r.dri_name }}</span></td>
+      <td><span class="chip2 faint {{ r.last_state }}">{{ r.last_display if r.last_display != '-' else '&mdash;'|safe }}</span></td>
+      <td>{% if r.cur_display %}<span class="chip2 {{ r.cur_state }}">{{ r.cur_display }}</span>{% else %}<span class="chip2 empty">&middot;</span>{% endif %}</td>
+      <td class="tgt">{{ r.target_display }}</td>
+      <td><span class="bars">{% for s in r.spark %}{% if s.pct is not none %}<i class="{{ s.state }}" style="height:{{ (s.pct * 0.2) | int + 4 }}px"></i>{% else %}<i class="s2"></i>{% endif %}{% endfor %}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endmacro %}
+
+{% macro client_panel(tv) %}
+{% if tv.clients %}
+<div class="card clientcard">
+  <div class="cht">Client health</div>
+  {% for c in tv.clients %}
+  <div class="crow"><span class="dot {{ c.state }}"></span><span class="cn">{{ c.name }}</span>
+    <span class="cs {{ c.state }}">{{ {'green':'Green','yellow':'Yellow','red':'Red','stale':'no update'}[c.state] }}{% if c.note %} &middot; {{ c.note }}{% endif %}</span></div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endmacro %}

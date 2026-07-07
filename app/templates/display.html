@@ -4,14 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aprendio Scorecard</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/scorecard.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
-<body class="tv" hx-get="/display/body?token={{ token }}" hx-trigger="every 60s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
+<body class="tv" hx-get="/display/body?token={{ token }}&view={{ tv.view }}" hx-trigger="every 60s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
 <main class="page" id="tvroot">
   {% include "_display_body.html" %}
 </main>
 {% from "_icons.html" import icon %}
-<a class="fab" href="/" title="Switch to edit mode">{{ icon('pencil') }}</a>
+<div class="fabs">
+  {% if tv.prev_view %}<a class="fab sub" href="/display?token={{ token }}&view={{ tv.prev_view }}" title="Previous view">{{ icon('chev-left') }}</a>{% endif %}
+  {% if tv.next_view %}<a class="fab sub" href="/display?token={{ token }}&view={{ tv.next_view }}" title="Next view">{{ icon('chev-right') }}</a>{% endif %}
+  <a class="fab" href="/" title="Switch to edit mode">{{ icon('pencil') }}</a>
+</div>
 </body>
 </html>

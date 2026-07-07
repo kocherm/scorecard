@@ -239,22 +239,46 @@ def _check_display_token(con: sqlite3.Connection, token: str) -> None:
         raise HTTPException(403, "Bad display token")
 
 
+DISPLAY_VIEWS = [("hybrid", "Hybrid board"), ("wall", "Status wall"),
+                 ("strip", "Now strip"), ("briefing", "Action briefing"),
+                 ("hud", "Founder HUD")]
+
+
+def _enabled_views(con: sqlite3.Connection) -> list[str]:
+    raw = dbm.get_setting(con, "display_views", "hybrid,wall,strip,briefing,hud")
+    valid = {v for v, _ in DISPLAY_VIEWS}
+    views = [v.strip() for v in raw.split(",") if v.strip() in valid]
+    return views or ["hybrid"]
+
+
+def _tv_for(con: sqlite3.Connection, view: str):
+    now = datetime.now(timezone.utc)
+    enabled = _enabled_views(con)
+    if view not in enabled:
+        view = enabled[0]
+    tv = gridm.build_tv(con, now)
+    tv.view = view
+    if len(enabled) > 1:
+        i = enabled.index(view)
+        tv.prev_view = enabled[(i - 1) % len(enabled)]
+        tv.next_view = enabled[(i + 1) % len(enabled)]
+    return tv, now
+
+
 @app.get("/display", response_class=HTMLResponse)
-def display_page(request: Request, token: str = "",
+def display_page(request: Request, token: str = "", view: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
-    now = datetime.now(timezone.utc)
-    tv = gridm.build_tv(con, now)
+    tv, now = _tv_for(con, view)
     return render(request, "display.html", tv=tv, token=token,
                   rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
 
 
 @app.get("/display/body", response_class=HTMLResponse)
-def display_body(request: Request, token: str = "",
+def display_body(request: Request, token: str = "", view: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
-    now = datetime.now(timezone.utc)
-    tv = gridm.build_tv(con, now)
+    tv, now = _tv_for(con, view)
     html = templates.env.get_template("_display_body.html").render(
         tv=tv, rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
     return HTMLResponse(f'<main class="page" id="tvroot">{html}</main>')
@@ -513,7 +537,17 @@ def admin_settings(request: Request, user=Depends(require_admin),
                   slack_channel_id=dbm.get_setting(con, "slack_channel_id") or "",
                   alerts_enabled=dbm.get_setting(con, "alerts_enabled", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
+                  all_views=DISPLAY_VIEWS, enabled_views=_enabled_views(con),
                   base_url=str(request.base_url).rstrip("/"))
+
+
+@app.post("/admin/settings/display-views")
+def save_display_views(views: list[str] = Form([]), user=Depends(require_admin),
+                       con: sqlite3.Connection = Depends(db_dep)):
+    valid = {v for v, _ in DISPLAY_VIEWS}
+    chosen = [v for v in views if v in valid] or ["hybrid"]
+    dbm.set_setting(con, "display_views", ",".join(chosen))
+    return RedirectResponse("/admin/settings", status_code=303)
 
 
 @app.post("/admin/settings/display-months")
