@@ -7,6 +7,13 @@ full-time on an office TV, and readable/writable by AI agents over a JSON API.
 Built with FastAPI, Jinja2, htmx, and SQLite. One container, no build chain, no
 JavaScript framework. A small team can run this for years on a $5 VPS.
 
+![TV display, hybrid view, demo data](docs/screenshot-tv.png)
+
+*The hybrid TV view with demo data: revenue progress track, action cards with
+owners and next steps, the three starred leading indicators, and the weekly
+strip. Four other views (status wall, now-strip, action briefing, founder HUD)
+are one button away.*
+
 ## Why another scorecard
 
 Spreadsheet scorecards die from two wounds: "Week 1-4" tabs that never line up

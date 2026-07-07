@@ -72,7 +72,8 @@ def main() -> None:
         def metric(key: str, sec: int, name: str, mtype: str, order: int,
                    rollup: str | None = "sum", direction: str = "up",
                    unit: str | None = None, dri_key: str | None = None) -> None:
-            has_history = key in history_numeric or key in history_status
+            has_history = (key in history_numeric
+                           or key.removeprefix("client_") in history_status)
             start = start_hist if has_history else start_fresh
             mid[key] = con.execute(
                 """INSERT INTO metrics (section_id, name, metric_type, rollup, direction,

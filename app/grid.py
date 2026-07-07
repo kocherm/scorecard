@@ -359,12 +359,13 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
         return next((c for c in row.cells if c.week == week), None)
 
     targets_by_metric: dict[int, Optional[float]] = {}
+    closed_targets: dict[int, Optional[float]] = {}
     for t in con.execute("SELECT metric_id, year, quarter, baseline_value, stretch_value FROM targets"):
-        y, q = wk.quarter_of(vm.current_week)
-        if t["year"] == y and t["quarter"] == q:
-            targets_by_metric[t["metric_id"]] = sc.target_for_week(
-                vm.current_week,
-                sc.QuarterTargets(t["baseline_value"], t["stretch_value"]))
+        qt = sc.QuarterTargets(t["baseline_value"], t["stretch_value"])
+        if (t["year"], t["quarter"]) == wk.quarter_of(vm.current_week):
+            targets_by_metric[t["metric_id"]] = sc.target_for_week(vm.current_week, qt)
+        if (t["year"], t["quarter"]) == wk.quarter_of(vm.last_closed):
+            closed_targets[t["metric_id"]] = sc.target_for_week(vm.last_closed, qt)
 
     for section in vm.sections:
         for row in section.rows:
@@ -430,11 +431,14 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 step = NEXT_STEP[lvl]
                 if lvl == 1 and row.has_131:
                     step = "1-3-1 filed - review in sync"
+                ct = closed_targets.get(row.metric_id)
+                ct_display = (fmt_value("numeric", row.unit, ct) if ct is not None
+                              else ("G" if row.metric_type == "status" else "-"))
                 actions.append(ActionItem(
                     kind="red", badge=f"RED - WEEK {row.red_streak}",
                     name=row.name,
                     value_display=(closed.display if closed and closed.display else "R"),
-                    target_display=row.target_display,
+                    target_display=ct_display,
                     dri_name=row.dri_name, initials=_initials(row.dri_name),
                     next_step=step))
             elif row.last_state == "stale":
