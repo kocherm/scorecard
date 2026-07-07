@@ -1,0 +1,77 @@
+{% from "_icons.html" import icon %}
+{% from "_cell.html" import cell_td %}
+
+{% macro grid_tables(vm, editable=false) %}
+{% for section in vm.sections %}
+<div class="card">
+  <div class="section-head">
+    <span class="icon">{{ icon(section.icon) }}</span>
+    <h2>{{ section.name }}</h2>
+  </div>
+  <div class="grid-wrap">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th class="metric-col" rowspan="2">Metric / DRI</th>
+          {% for band in vm.bands %}
+          <th class="band {% if band.weeks[-1] == vm.current_week %}current-month{% endif %}"
+              colspan="{{ band.weeks|length + 1 }}">{{ band.label }} {{ band.year }}</th>
+          {% endfor %}
+          <th class="pin" rowspan="2">Target</th>
+          <th class="pin" rowspan="2">Actual</th>
+          <th class="pin" rowspan="2">Trend</th>
+        </tr>
+        <tr>
+          {% for band in vm.bands %}
+            {% for w in band.weeks %}
+            <th class="wk {% if w == vm.current_week %}current{% endif %}">
+              {{ w | qlabel }}
+              <span class="d">{{ w.strftime('%b %-d') }}</span>
+            </th>
+            {% endfor %}
+            <th class="subtotal">MO</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in section.rows %}
+        <tr>
+          <td class="metric-cell">
+            <div class="mname">{{ row.name }}
+              {% if row.escalation >= 1 %}
+                {% if editable %}
+                <a class="badge-131 {% if row.has_131 %}filed{% endif %}"
+                   href="/131/{{ row.metric_id }}/{{ row.latest_131_week }}">
+                   {% if row.has_131 %}1-3-1 filed{% else %}1-3-1 due{% endif %}{% if row.escalation >= 2 %} &middot; wk {{ row.red_streak }}{% endif %}</a>
+                {% else %}
+                <span class="badge-131 {% if row.has_131 %}filed{% endif %}">
+                   {% if row.has_131 %}1-3-1 filed{% else %}1-3-1 due{% endif %}{% if row.escalation >= 2 %} &middot; wk {{ row.red_streak }}{% endif %}</span>
+                {% endif %}
+              {% endif %}
+            </div>
+            <div class="mdri">{{ row.dri_name }}</div>
+          </td>
+          {% set cell_i = namespace(v=0) %}
+          {% for band in vm.bands %}
+            {% for w in band.weeks %}
+              {{ cell_td(row, row.cells[cell_i.v], editable) }}
+              {% set cell_i.v = cell_i.v + 1 %}
+            {% endfor %}
+            {% set sub = row.band_subtotals[loop.index0] %}
+            <td class="subtotal">{{ sub if sub is not none else '-' }}</td>
+          {% endfor %}
+          <td class="pin target">{{ row.target_display }}</td>
+          <td class="pin actual">{{ row.actual_display }}</td>
+          <td class="pin">
+            <span class="spark">
+              {% for s in row.spark %}<i class="{{ s.state }}"></i>{% endfor %}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+{% endmacro %}

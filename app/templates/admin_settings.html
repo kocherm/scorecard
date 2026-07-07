@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Settings</h1>
+</div>
+<div class="panel" style="max-width:640px">
+  <h2>TV display</h2>
+  <p class="note">Open this URL on the TV browser. No login needed; rotating the token invalidates the old URL.</p>
+  <p><span class="mono">{{ base_url }}/display?token={{ display_token }}</span></p>
+  <form method="post" action="/admin/settings/rotate-display-token">
+    <button class="btn secondary sm" onclick="return confirm('Rotate? The TV will need the new URL.')">Rotate display token</button>
+  </form>
+</div>
+<div class="panel" style="max-width:640px">
+  <h2>Slack alerts</h2>
+  <p class="note">Stale sweep runs Wednesday 8:00 AM Chicago; red-escalation sweep Tuesday 8:00 AM. Channel messages use the webhook; DMs to DRIs need the bot token + each user's Slack member ID (Users page).</p>
+  <form method="post" action="/admin/settings/slack">
+    <label>Incoming webhook URL (posts to #aprendio)</label>
+    <input type="text" name="slack_webhook_url" value="{{ slack_webhook_url }}" placeholder="https://hooks.slack.com/services/...">
+    <label>Bot token (optional, enables DMs)</label>
+    <input type="text" name="slack_bot_token" value="{{ slack_bot_token }}" placeholder="xoxb-...">
+    <div style="margin-top:14px; display:flex; gap:10px">
+      <button class="btn" type="submit">Save</button>
+      <button class="btn secondary" formaction="/admin/settings/slack-test">Save &amp; send test message</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

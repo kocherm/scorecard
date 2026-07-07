@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}API tokens{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>API tokens</h1>
+  <p class="page-sub">Bearer tokens for Hermes, n8n, and other integrations. <span class="mono">GET /api/v1/scorecard</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/entries</span></p>
+</div>
+{% if new_token %}
+<div class="flash ok">Token <strong>{{ new_name }}</strong> created: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.</div>
+{% endif %}
+<div class="panel">
+  <table class="list">
+    <tr><th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr>
+    {% for t in tokens %}
+    <tr>
+      <td>{{ t['name'] }}</td>
+      <td>{{ t['scope'] }}</td>
+      <td class="note">{{ t['created_at'][:10] }}</td>
+      <td class="note">{{ t['last_used_at'][:16] if t['last_used_at'] else 'never' }}</td>
+      <td><span class="chip {{ 'off' if t['revoked_at'] else 'on' }}">{{ 'revoked' if t['revoked_at'] else 'active' }}</span></td>
+      <td>
+        {% if not t['revoked_at'] %}
+        <form method="post" action="/admin/tokens/{{ t['id'] }}/revoke">
+          <button class="btn danger sm" onclick="return confirm('Revoke {{ t['name'] }}?')">Revoke</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <h3>New token</h3>
+  <form method="post" action="/admin/tokens" style="display:flex; gap:10px; align-items:end">
+    <div><label>Name</label><input type="text" name="name" placeholder="hermes" required></div>
+    <div><label>Scope</label>
+      <select name="scope">
+        <option value="read_write">read + write</option>
+        <option value="read">read only</option>
+        <option value="write">write only</option>
+      </select></div>
+    <button class="btn" type="submit">Create</button>
+  </form>
+</div>
+{% endblock %}

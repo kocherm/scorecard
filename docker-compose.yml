@@ -1,0 +1,14 @@
+services:
+  scorecard:
+    build: .
+    container_name: aprendio-scorecard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8096:8000"
+    volumes:
+      - scorecard-data:/srv/scorecard/data
+      # seed data (client names, staff emails) stays out of the image and repo:
+      - ./migrate/seed_data.local.json:/srv/scorecard/migrate/seed_data.local.json:ro
+
+volumes:
+  scorecard-data:

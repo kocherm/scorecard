@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "_grid_table.html" import grid_tables %}
+{% block title %}Scorecard{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">{{ vm.quarter_label }} &middot; week of {{ vm.current_week.strftime('%B %-d, %Y') }}</div>
+  <h1>Company Scorecard</h1>
+  <p class="page-sub">
+    {% if can_edit %}Tap a cell to enter this week's number. Last week is due Monday EOD; missing cells go gray Wednesday 8am and ping Slack.
+    {% else %}Read-only view.{% endif %}
+  </p>
+</div>
+{{ grid_tables(vm, editable=can_edit) }}
+{% endblock %}

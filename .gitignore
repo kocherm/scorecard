@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+.env
+.pytest_cache/
+uv.lock
+seed_data.local.json
+SPEC.local.md
+deploy/DEPLOY.local.md

@@ -1,0 +1,10 @@
+{% macro cell_td(row, cell, editable) %}
+<td id="cell-{{ row.metric_id }}-{{ cell.week.isoformat() }}"
+    class="cell {{ cell.state.value }} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
+    {% if editable and cell.editable %}
+    hx-get="/cell/{{ row.metric_id }}/{{ cell.week.isoformat() }}/edit"
+    hx-target="this" hx-swap="outerHTML"
+    {% endif %}>
+  {%- if cell.display %}{{ cell.display }}{% elif cell.state.value == 'stale' %}&mdash;{% endif -%}
+</td>
+{% endmacro %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Edit metric{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin &middot; {{ section['name'] }}</div>
+  <h1>{{ m['name'] }}</h1>
+</div>
+<div class="panel" style="max-width:560px">
+  <form method="post">
+    <label>Name</label><input type="text" name="name" value="{{ m['name'] }}" required>
+    <label>Section</label>
+    <select name="section_id">
+      {% for s in sections %}<option value="{{ s['id'] }}" {% if s['id'] == m['section_id'] %}selected{% endif %}>{{ s['name'] }}</option>{% endfor %}
+    </select>
+    <label>Type</label>
+    <select name="metric_type">
+      <option value="numeric" {% if m['metric_type'] == 'numeric' %}selected{% endif %}>numeric</option>
+      <option value="binary" {% if m['metric_type'] == 'binary' %}selected{% endif %}>binary</option>
+      <option value="status" {% if m['metric_type'] == 'status' %}selected{% endif %}>status (R/Y/G)</option>
+    </select>
+    <label>Rollup (numeric only)</label>
+    <select name="rollup">
+      <option value="sum" {% if m['rollup'] == 'sum' %}selected{% endif %}>sum</option>
+      <option value="average" {% if m['rollup'] == 'average' %}selected{% endif %}>average</option>
+    </select>
+    <label>Unit</label><input type="text" name="unit" value="{{ m['unit'] or '' }}">
+    <label>Direction</label>
+    <select name="direction">
+      <option value="up" {% if m['direction'] == 'up' %}selected{% endif %}>higher is better</option>
+      <option value="down" {% if m['direction'] == 'down' %}selected{% endif %}>lower is better</option>
+    </select>
+    <label>DRI</label>
+    <select name="dri_user_id">
+      <option value="">-</option>
+      {% for u in users %}<option value="{{ u['id'] }}" {% if u['id'] == m['dri_user_id'] %}selected{% endif %}>{{ u['display_name'] }}</option>{% endfor %}
+    </select>
+    <label>Start week (a Monday; earlier weeks show as n/a)</label>
+    <input type="date" name="start_week" value="{{ m['start_week'] }}">
+    <label>Sort order</label>
+    <input type="number" name="sort_order" value="{{ m['sort_order'] }}">
+    <div style="margin-top:16px; display:flex; gap:10px">
+      <button class="btn" type="submit">Save</button>
+      <a class="btn secondary" href="/admin/metrics">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

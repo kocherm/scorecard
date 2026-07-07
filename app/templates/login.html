@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Aprendio Scorecard</title>
+<link rel="stylesheet" href="/static/scorecard.css">
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="brandline"><span class="seam"></span><span class="wordmark">APRENDIO</span></div>
+    <h1>Company Scorecard</h1>
+    {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autofocus>
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

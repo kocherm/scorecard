@@ -1,0 +1,38 @@
+{
+  "_comment": "Copy to seed_data.local.json (gitignored) and fill in. ALL company-specific data lives here: people, clients, targets, historical values. Nothing in the repo itself should identify your business.",
+  "users": [
+    {"name": "Admin Person", "email": "admin@example.com", "role": "admin"},
+    {"name": "Editor One", "email": "editor1@example.com", "role": "editor"}
+  ],
+  "clients": ["Client A", "Client B"],
+  "dri": {
+    "sales_activity": "editor1@example.com",
+    "calls_held": "admin@example.com",
+    "revenue": "admin@example.com",
+    "client_health": "admin@example.com",
+    "content": "editor1@example.com",
+    "followers": "editor1@example.com"
+  },
+  "targets": {
+    "conversations": [25, 35],
+    "followups": [25, 35],
+    "calls_booked": [3, 5],
+    "calls_held": [5, 7],
+    "proposals": [2, 3],
+    "mrr": [25000, 33000],
+    "new_mrr": [2500, 4000],
+    "churn_risk": [10000, 10000],
+    "scripts": [7, 10],
+    "posts": [5, 7],
+    "content_convos": [10, 15],
+    "bugs": [3, 3]
+  },
+  "target_quarter": {"year": 2026, "quarter": 3},
+  "history_weeks": ["2026-06-01", "2026-06-08"],
+  "history_numeric": {
+    "conversations": [null, 5]
+  },
+  "history_status": {
+    "Client A": ["G", "Y"]
+  }
+}

@@ -1,0 +1,20 @@
+<td id="cell-{{ metric.id }}-{{ week }}" class="cell">
+  <form class="cell-form" hx-post="/cell/{{ metric.id }}/{{ week }}"
+        hx-target="closest td" hx-swap="outerHTML">
+    {% if metric.metric_type == 'status' %}
+      <select name="value" autofocus>
+        <option value="G" {% if current == 'G' %}selected{% endif %}>G</option>
+        <option value="Y" {% if current == 'Y' %}selected{% endif %}>Y</option>
+        <option value="R" {% if current == 'R' %}selected{% endif %}>R</option>
+      </select>
+    {% elif metric.metric_type == 'binary' %}
+      <select name="value" autofocus>
+        <option value="1" {% if current == 1 %}selected{% endif %}>Yes</option>
+        <option value="0" {% if current == 0 %}selected{% endif %}>No</option>
+      </select>
+    {% else %}
+      <input type="number" step="any" name="value" value="{{ current if current is not none else '' }}" autofocus>
+    {% endif %}
+    <button type="submit">Save</button>
+  </form>
+</td>

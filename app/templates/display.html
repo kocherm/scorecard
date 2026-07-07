@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aprendio Scorecard</title>
+<link rel="stylesheet" href="/static/scorecard.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body class="tv" hx-get="/display/body?token={{ token }}" hx-trigger="every 60s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
+<main class="page" id="tvroot">
+  {% include "_display_body.html" %}
+</main>
+</body>
+</html>

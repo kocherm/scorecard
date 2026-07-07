@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Users</h1>
+  <p class="page-sub">Admins manage everything. Editors update metrics. Viewers can only look.</p>
+</div>
+{% if temp_password %}
+<div class="flash ok">Temporary password for <strong>{{ temp_user }}</strong>: <span class="mono">{{ temp_password }}</span> - share it now; it is not shown again. They will be asked to change it on first sign-in.</div>
+{% endif %}
+<div class="panel">
+  <table class="list">
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Slack member ID</th><th>Status</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u['display_name'] }}</td>
+      <td>{{ u['email'] }}</td>
+      <td>
+        <form method="post" action="/admin/users/{{ u['id'] }}/role" style="display:inline">
+          <select name="role" onchange="this.form.submit()" {% if u['id'] == user['id'] %}disabled{% endif %}>
+            <option value="admin" {% if u['role'] == 'admin' %}selected{% endif %}>admin</option>
+            <option value="editor" {% if u['role'] == 'editor' %}selected{% endif %}>editor</option>
+            <option value="viewer" {% if u['role'] == 'viewer' %}selected{% endif %}>viewer</option>
+          </select>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/admin/users/{{ u['id'] }}/slack" style="display:flex; gap:6px">
+          <input type="text" name="slack_member_id" value="{{ u['slack_member_id'] or '' }}" placeholder="U0123ABC" style="width:120px">
+          <button class="btn secondary sm">Save</button>
+        </form>
+      </td>
+      <td><span class="chip {{ 'on' if u['is_active'] else 'off' }}">{{ 'active' if u['is_active'] else 'deactivated' }}</span></td>
+      <td style="white-space:nowrap">
+        <form method="post" action="/admin/users/{{ u['id'] }}/reset" style="display:inline">
+          <button class="btn secondary sm">Reset password</button>
+        </form>
+        {% if u['id'] != user['id'] %}
+        <form method="post" action="/admin/users/{{ u['id'] }}/toggle" style="display:inline">
+          <button class="btn danger sm">{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h3>Add user</h3>
+  <form method="post" action="/admin/users" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap">
+    <div><label>Name</label><input type="text" name="display_name" required></div>
+    <div><label>Email</label><input type="email" name="email" required></div>
+    <div><label>Role</label>
+      <select name="role">
+        <option value="editor">editor</option>
+        <option value="viewer">viewer</option>
+        <option value="admin">admin</option>
+      </select></div>
+    <button class="btn" type="submit">Create (temp password shown once)</button>
+  </form>
+</div>
+{% endblock %}

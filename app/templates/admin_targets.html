@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Targets{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Targets &middot; Q{{ quarter }} {{ year }}</h1>
+  <p class="page-sub">Baseline applies quarter-weeks 1-6, stretch from week 7 to quarter end. Changing a target rescores the whole quarter.</p>
+</div>
+<div class="panel">
+  <form method="get" style="display:flex; gap:10px; align-items:end; margin-bottom:14px">
+    <div><label>Year</label><input type="number" name="year" value="{{ year }}" style="width:100px"></div>
+    <div><label>Quarter</label>
+      <select name="quarter" style="width:80px">
+        {% for q in [1,2,3,4] %}<option value="{{ q }}" {% if q == quarter %}selected{% endif %}>Q{{ q }}</option>{% endfor %}
+      </select></div>
+    <button class="btn secondary sm">View</button>
+  </form>
+  {% if missing %}<div class="flash warn">{{ missing }} numeric metric(s) have no target for Q{{ quarter }} {{ year }}. They show values without color until set.</div>{% endif %}
+  <table class="list">
+    <tr><th>Metric</th><th>Section</th><th>Unit</th><th>Baseline (W1-6)</th><th>Stretch (W7+)</th><th></th></tr>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.m['name'] }}</td>
+      <td class="note">{{ row.m['section_name'] }}</td>
+      <td class="note">{{ row.m['unit'] or '-' }}</td>
+      <form method="post" action="/admin/targets/{{ row.m['id'] }}?year={{ year }}&quarter={{ quarter }}">
+      <td><input type="number" step="any" name="baseline" value="{{ row.t['baseline_value'] if row.t else '' }}" style="width:110px" required></td>
+      <td><input type="number" step="any" name="stretch" value="{{ row.t['stretch_value'] if row.t else '' }}" style="width:110px" required></td>
+      <td><button class="btn sm">Save</button></td>
+      </form>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

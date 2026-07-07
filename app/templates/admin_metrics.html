@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Metrics{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Sections &amp; Metrics</h1>
+  <p class="page-sub">Structure of the scorecard. Archiving keeps history; nothing is ever deleted.</p>
+</div>
+
+{% for s in sections %}
+<div class="panel">
+  <div style="display:flex; align-items:center; gap:12px">
+    <h2 style="margin:0">{{ s['name'] }}</h2>
+    <span class="chip {{ 'on' if s['is_enabled'] else 'off' }}">{{ 'visible' if s['is_enabled'] else 'hidden' }}</span>
+    <form method="post" action="/admin/sections/{{ s['id'] }}/toggle" style="margin-left:auto">
+      <button class="btn secondary sm">{{ 'Hide section' if s['is_enabled'] else 'Show section' }}</button>
+    </form>
+  </div>
+  <table class="list">
+    <tr><th>Metric</th><th>Type</th><th>DRI</th><th>Unit</th><th>Direction</th><th>Start week</th><th></th></tr>
+    {% for m in s.metrics %}
+    <tr {% if m['archived_at'] %}style="opacity:.45"{% endif %}>
+      <td>{{ m['name'] }}</td>
+      <td>{{ m['metric_type'] }}{% if m['rollup'] %} ({{ m['rollup'] }}){% endif %}</td>
+      <td>{{ m['dri_name'] or '-' }}</td>
+      <td>{{ m['unit'] or '-' }}</td>
+      <td>{{ 'higher is better' if m['direction'] == 'up' else 'lower is better' }}</td>
+      <td>{{ m['start_week'] }}</td>
+      <td style="white-space:nowrap">
+        <a class="btn secondary sm" href="/admin/metrics/{{ m['id'] }}">Edit</a>
+        {% if not m['archived_at'] %}
+        <form method="post" action="/admin/metrics/{{ m['id'] }}/archive" style="display:inline">
+          <button class="btn danger sm" onclick="return confirm('Archive {{ m['name'] }}? History is kept.')">Archive</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/metrics/{{ m['id'] }}/unarchive" style="display:inline">
+          <button class="btn secondary sm">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h3>Add metric to {{ s['name'] }}</h3>
+  <form method="post" action="/admin/metrics" style="display:grid; grid-template-columns: repeat(6, minmax(120px, 1fr)) auto; gap:10px; align-items:end; max-width:1100px">
+    <input type="hidden" name="section_id" value="{{ s['id'] }}">
+    <div><label>Name</label><input type="text" name="name" required></div>
+    <div><label>Type</label>
+      <select name="metric_type">
+        <option value="numeric">numeric</option>
+        <option value="binary">binary (yes/no)</option>
+        <option value="status">status (R/Y/G)</option>
+      </select></div>
+    <div><label>Rollup</label>
+      <select name="rollup"><option value="sum">sum</option><option value="average">average</option></select></div>
+    <div><label>Unit</label><input type="text" name="unit" placeholder="$"></div>
+    <div><label>Direction</label>
+      <select name="direction"><option value="up">higher is better</option><option value="down">lower is better</option></select></div>
+    <div><label>DRI</label>
+      <select name="dri_user_id"><option value="">-</option>
+        {% for u in users %}<option value="{{ u['id'] }}">{{ u['display_name'] }}</option>{% endfor %}
+      </select></div>
+    <button class="btn sm" type="submit">Add</button>
+  </form>
+</div>
+{% endfor %}
+
+<div class="panel">
+  <h2>New section</h2>
+  <form method="post" action="/admin/sections" style="display:flex; gap:10px; align-items:end">
+    <div><label>Name</label><input type="text" name="name" required></div>
+    <div><label>Icon</label>
+      <select name="icon">
+        <option value="trend">trend</option><option value="dollar">dollar</option>
+        <option value="heart">heart</option><option value="megaphone">megaphone</option>
+        <option value="wrench">wrench</option><option value="users">users</option>
+        <option value="chart">chart</option>
+      </select></div>
+    <button class="btn" type="submit">Add section</button>
+  </form>
+</div>
+{% endblock %}
