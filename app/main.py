@@ -31,6 +31,10 @@ BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.filters["qlabel"] = lambda w: wk.quarter_label(
     w if isinstance(w, date) else wk.parse_week(w))
+# Cache-buster: changes whenever the stylesheet changes, so browsers never
+# serve a stale scorecard.css after a deploy.
+templates.env.globals["static_v"] = str(int(
+    (BASE / "static" / "scorecard.css").stat().st_mtime))
 
 scheduler = BackgroundScheduler()
 

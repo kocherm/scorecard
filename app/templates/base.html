@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Scorecard{% endblock %} - Aprendio</title>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
-<link rel="stylesheet" href="/static/scorecard.css">
+<link rel="stylesheet" href="/static/scorecard.css?v={{ static_v }}">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
 {% from "_icons.html" import icon %}
 {% block chrome %}
 <aside class="sidenav">
-  <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio"></a>
+  <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio" width="36" height="36"></a>
   <nav>
     <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
     {% if user and user['role'] == 'admin' %}

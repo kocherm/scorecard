@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aprendio Scorecard</title>
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
-<link rel="stylesheet" href="/static/scorecard.css">
+<link rel="stylesheet" href="/static/scorecard.css?v={{ static_v }}">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body class="tv" hx-get="/display/body?token={{ token }}&view={{ tv.view }}" hx-trigger="every 60s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
