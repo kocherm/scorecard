@@ -84,8 +84,10 @@ def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep))
 def list_metrics(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
     rows = con.execute(
-        """SELECT m.id, m.name, m.metric_type, m.unit, s.name AS section
+        """SELECT m.id, m.name, m.metric_type, m.unit, s.name AS section,
+                  u.display_name AS dri
            FROM metrics m JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id
            WHERE m.archived_at IS NULL ORDER BY s.sort_order, m.sort_order"""
     ).fetchall()
     return [dict(r) for r in rows]

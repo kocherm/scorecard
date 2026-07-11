@@ -6,7 +6,7 @@
   <div class="tiles">
     {% for r in tv.strip if not r.is_key and r.metric_type != 'status' %}
     <div class="tile">
-      <div class="tn">{{ r.name }}</div>
+      <div class="tn">{{ r.name }}{% if r.dri_name != '-' %}<span class="twho">{{ r.dri_name }}</span>{% endif %}</div>
       <div class="tv2 {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
       <div class="tt">{% if r.week_note %}{{ r.week_note }}{% if r.target_display != '-' %} &middot; target {{ r.target_display }}{% endif %}{% else %}no data yet{% endif %}</div>
       <div class="meter"><i class="{{ r.latest_state }}" style="width:{{ r.pct if r.pct is not none else 0 }}%"></i></div>
@@ -15,7 +15,7 @@
   </div>
   <div class="chiprow">
     {% for c in tv.clients %}
-    <span class="pill {{ c.state }}"><span class="dot {{ c.state }}"></span>{{ c.name }}{% if c.note %} &middot; {{ c.note }}{% endif %}</span>
+    <span class="pill {{ c.state }}"><span class="dot {{ c.state }}"></span>{{ c.name }}{% if c.dri %} <span class="pwho">&middot; {{ c.dri }}</span>{% endif %}{% if c.note %} &middot; {{ c.note }}{% endif %}</span>
     {% endfor %}
   </div>
 {% elif tv.view == 'strip' %}
@@ -42,6 +42,7 @@
       {% if r.section != hsec.v %}<div class="hsec">{{ r.section }}</div>{% set hsec.v = r.section %}{% endif %}
       <div class="hrow">
         <span class="hn {% if r.is_key %}key{% endif %}"><span class="dot {{ r.dot }}"></span>{{ r.name }}{% if r.is_key %} <span class="star">&#9733;</span>{% endif %}</span>
+        <span class="hwho">{{ r.dri_name if r.dri_name != '-' else '' }}</span>
         <span class="hist">{% for s in r.spark %}<i class="{{ s.state }}"></i>{% endfor %}<i class="{{ r.cur_state }} now"></i></span>
         <span class="hv {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</span>
         <span class="ht">{% if r.target_display != '-' %}/ {{ r.target_display }}{% endif %}</span>
@@ -69,6 +70,7 @@
       <div class="hstrip">
         {% for r in tv.strip if not r.is_key and r.metric_type != 'status' %}
         <div class="srow"><span class="dot {{ r.dot }}"></span><span class="sn">{{ r.name }}</span>
+          {% if r.dri_name != '-' %}<span class="swho">{{ r.dri_name }}</span>{% endif %}
           <span class="sv {{ r.latest_state }}">{% if r.latest_display != '-' %}{{ r.latest_display }}{% if r.target_display != '-' %} / {{ r.target_display }}{% endif %}{% else %}not updated{% endif %}</span></div>
         {% endfor %}
       </div>

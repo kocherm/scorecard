@@ -454,6 +454,7 @@ table.now .tgt { color: var(--slate); font-size: 13px; font-variant-numeric: tab
   border-bottom: 1px solid var(--pearl); font-size: 14px; }
 .clientcard .crow:last-child { border-bottom: none; }
 .clientcard .cn { font-weight: 500; }
+.clientcard .cwho { font-size: 12px; color: var(--silver); }
 .clientcard .cs { margin-left: auto; font-weight: 600; font-size: 12.5px; }
 .clientcard .cs.green { color: var(--green-deep); } .clientcard .cs.yellow { color: var(--amber-deep); }
 .clientcard .cs.red { color: var(--red-deep); } .clientcard .cs.stale { color: var(--silver); }
@@ -475,6 +476,7 @@ body.tv .chip2 { font-size: 15px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .tile { background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg); padding: 13px 15px 11px; box-shadow: var(--shadow-card); }
 .tile .tn { font-size: 12.5px; color: var(--slate); line-height: 1.3; min-height: 34px; }
+.tile .tn .twho { display: block; font-size: 11px; color: var(--silver); }
 .tile .tv2 { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .tile .tv2.green { color: var(--green-deep); } .tile .tv2.yellow { color: var(--amber-deep); }
 .tile .tv2.red { color: var(--red-deep); }
@@ -490,6 +492,7 @@ body.tv .chip2 { font-size: 15px; }
 .pill.yellow { background: var(--amber-subtle); color: var(--amber-deep); }
 .pill.red { background: var(--red-subtle); color: var(--red-deep); }
 .pill.stale { background: var(--stale-subtle); color: var(--silver); }
+.chiprow .pill .pwho { font-weight: 500; opacity: 0.75; }
 
 /* briefing view */
 .brief { display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
@@ -509,6 +512,8 @@ body.tv .chip2 { font-size: 15px; }
 .hrow .hn { font-size: 14.5px; font-weight: 500; width: 270px; flex: none; display: flex; gap: 9px; align-items: center; }
 .hrow .hn.key { font-weight: 600; color: var(--navy); }
 .hrow .hn .star { color: var(--accent); font-size: 12px; }
+.hrow .hwho { flex: none; width: 110px; font-size: 12px; color: var(--silver);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hist { display: inline-flex; gap: 4px; }
 .hist i { width: 15px; height: 15px; border-radius: 4px; background: var(--pearl); }
 .hist i.green { background: rgba(56,161,105,0.75); } .hist i.yellow { background: rgba(214,158,46,0.75); }
@@ -540,6 +545,7 @@ body.tv .chip2 { font-size: 15px; }
 .hstrip { display: flex; flex-direction: column; gap: 8px; }
 .hstrip .srow { display: flex; align-items: center; gap: 10px; font-size: 14.5px; }
 .hstrip .srow .sn { color: var(--ink); }
+.hstrip .srow .swho { font-size: 12px; color: var(--silver); }
 .hstrip .srow .sv { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
 .hstrip .srow .sv.green { color: var(--green-deep); } .hstrip .srow .sv.yellow { color: var(--amber-deep); }
 .hstrip .srow .sv.red { color: var(--red-deep); } .hstrip .srow .sv.stale, .hstrip .srow .sv.pending { color: var(--silver); }

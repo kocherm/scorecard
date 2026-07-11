@@ -60,8 +60,8 @@ class Summary:
     stale: int = 0
     pending: int = 0
     other: int = 0
-    red_names: list[str] = field(default_factory=list)
-    stale_names: list[str] = field(default_factory=list)
+    red_names: list[str] = field(default_factory=list)    # "Metric (DRI)"
+    stale_names: list[str] = field(default_factory=list)  # "Metric (DRI)"
 
 
 @dataclass
@@ -219,16 +219,18 @@ def build_grid(con: sqlite3.Connection, now: datetime,
 
             closed_state = sc.cell_state(info, closed, closed_entry,
                                          target_for(m["id"], closed), now, tz)
+            owned_name = (f"{m['name']} ({m['dri_name']})" if m["dri_name"]
+                          else m["name"])
             if closed_state == sc.CellState.GREEN:
                 summary.green += 1
             elif closed_state == sc.CellState.YELLOW:
                 summary.yellow += 1
             elif closed_state == sc.CellState.RED:
                 summary.red += 1
-                summary.red_names.append(m["name"])
+                summary.red_names.append(owned_name)
             elif closed_state == sc.CellState.STALE:
                 summary.stale += 1
-                summary.stale_names.append(m["name"])
+                summary.stale_names.append(owned_name)
             elif closed_state == sc.CellState.PENDING:
                 summary.pending += 1
             else:
@@ -377,7 +379,8 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 note = ""
                 if row.red_streak >= 2:
                     note = f"week {row.red_streak}"
-                clients.append({"name": row.name, "state": st, "note": note})
+                clients.append({"name": row.name, "state": st, "note": note,
+                                "dri": row.dri_name if row.dri_name != "-" else ""})
             if row.metric_type != "status" and row.is_key:
                 # Prefer this week's number; fall back to last week's.
                 use, week_note = (cur, "this week")

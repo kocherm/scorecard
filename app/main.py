@@ -242,13 +242,17 @@ def one_three_one_page(metric_id: int, week: str, request: Request,
                        con: sqlite3.Connection = Depends(db_dep)):
     m = _metric_or_404(con, metric_id)
     w = wk.parse_week(week)
+    dri = con.execute(
+        "SELECT display_name FROM users WHERE id = ?", (m["dri_user_id"],)
+    ).fetchone() if m["dri_user_id"] else None
     existing = con.execute(
         """SELECT o.*, u.display_name AS author FROM one_three_ones o
            JOIN users u ON u.id = o.created_by
            WHERE o.metric_id = ? AND o.week_start = ?""",
         (metric_id, week)).fetchone()
     return render(request, "onethreeone.html", user=user, active="grid",
-                  metric=m, week=week, week_date=w, existing=existing,
+                  metric=m, dri_name=dri["display_name"] if dri else None,
+                  week=week, week_date=w, existing=existing,
                   existing_options=json.loads(existing["options_json"]) if existing else [])
 
 
@@ -432,8 +436,10 @@ def admin_targets(request: Request, year: Optional[int] = None, quarter: Optiona
     year = year or y
     quarter = quarter or q
     metrics = con.execute(
-        """SELECT m.*, s.name AS section_name FROM metrics m
+        """SELECT m.*, s.name AS section_name, u.display_name AS dri_name
+           FROM metrics m
            JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id
            WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
            ORDER BY s.sort_order, m.sort_order""").fetchall()
     rows = []

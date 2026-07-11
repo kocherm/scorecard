@@ -17,10 +17,11 @@
   </form>
   {% if missing %}<div class="flash warn">{{ missing }} numeric metric(s) have no target for Q{{ quarter }} {{ year }}. They show values without color until set.</div>{% endif %}
   <table class="list">
-    <tr><th>Metric</th><th>Section</th><th>Unit</th><th>Baseline (W1-6)</th><th>Stretch (W7+)</th><th></th></tr>
+    <tr><th>Metric</th><th>DRI</th><th>Section</th><th>Unit</th><th>Baseline (W1-6)</th><th>Stretch (W7+)</th><th></th></tr>
     {% for row in rows %}
     <tr>
       <td>{{ row.m['name'] }}</td>
+      <td class="note">{{ row.m['dri_name'] or '-' }}</td>
       <td class="note">{{ row.m['section_name'] }}</td>
       <td class="note">{{ row.m['unit'] or '-' }}</td>
       <form method="post" action="/admin/targets/{{ row.m['id'] }}?year={{ year }}&quarter={{ quarter }}">

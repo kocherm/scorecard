@@ -95,6 +95,7 @@
   <div class="cht">Client health</div>
   {% for c in tv.clients %}
   <div class="crow"><span class="dot {{ c.state }}"></span><span class="cn">{{ c.name }}</span>
+    {% if c.dri %}<span class="cwho">{{ c.dri }}</span>{% endif %}
     <span class="cs {{ c.state }}">{{ {'green':'Green','yellow':'Yellow','red':'Red','stale':'no update'}[c.state] }}{% if c.note %} &middot; {{ c.note }}{% endif %}</span></div>
   {% endfor %}
 </div>
