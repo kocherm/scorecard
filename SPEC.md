@@ -58,6 +58,10 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
   GET /scorecard returns full scored state (including stale and red lists);
   POST /metrics/{id}/entries writes values. Same scoring code path as the UI.
 
+Every surface names the metric's DRI next to the item: TV views, edit grid,
+summary strips, 1-3-1 page, admin pages, and API responses. Accountability is
+never more than a glance away.
+
 ## Review cadence (methodology, enforced socially not in code)
 
 Weekly sync, scorecard first, discuss only yellows and reds. Green means no
