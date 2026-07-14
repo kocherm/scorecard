@@ -306,6 +306,18 @@ def _tv_for(con: sqlite3.Connection, view: str):
     return tv, now
 
 
+@app.get("/tv")
+def tv_shortcut(view: str = "", con: sqlite3.Connection = Depends(db_dep)):
+    """Typeable shortcut for a TV/kiosk browser: looks up the current display
+    token server-side and 302-redirects to /display. 302 (not 301/308) so the
+    redirect is never cached and keeps working after the token is rotated."""
+    token = dbm.get_setting(con, "display_token") or ""
+    dest = f"/display?token={token}"
+    if view:
+        dest += f"&view={view}"
+    return RedirectResponse(dest, status_code=302)
+
+
 @app.get("/display", response_class=HTMLResponse)
 def display_page(request: Request, token: str = "", view: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
