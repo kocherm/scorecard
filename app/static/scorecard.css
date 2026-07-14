@@ -315,9 +315,11 @@ body.login-page {
   --tvb-stale: rgba(148,163,178,0.32);
 }
 body.tvboard {
+  /* Hairline grid at 1.5%: visible as texture from the couch, invisible up
+     close - at 3.5% the lines competed with row text at close range. */
   background:
-    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 56px 56px,
-    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px) 0 0 / 56px 56px,
     var(--navy-deep);
   color: var(--pearl); height: 100vh; overflow: hidden;
 }
