@@ -296,6 +296,9 @@ class BoardRow:
 class BoardSection:
     name: str
     rows: list
+    hidden: list = field(default_factory=list)  # folded rows behind the "+N" summary
+    overflow_state: str = ""                    # worst hidden state, colors the +N chip
+    overflow_label: str = ""                    # e.g. "all green" / "3 green · 1 no data"
 
 
 @dataclass
@@ -335,6 +338,93 @@ NEXT_STEP = {
     2: "15-min 1:1 this week",
     3: "structural conversation",
 }
+
+
+# ---- board layout: the type scale never shrinks below legibility to absorb
+# an unbounded list. Status-only sections (client health) sort worst-first;
+# when a column would exceed COL_CAP_UNITS, their greenest tail rows fold
+# into one "+N" summary row. Curated numeric sections never fold, and the
+# edit grid always shows the complete list.
+HDR_UNITS = 0.6       # a section label costs this fraction of a row's height
+COL_CAP_UNITS = 11.0  # ~10 rows + labels per column, keeps rows >= ~6.4vh
+
+_SEVERITY = {"red": 0, "yellow": 1, "stale": 2, "pending": 3, "green": 5}
+
+_STATE_WORD = {"red": "red", "yellow": "yellow", "stale": "no data",
+               "pending": "pending", "green": "green"}
+
+
+def _severity_key(r: BoardRow) -> tuple[int, int]:
+    # An active red streak outranks everything, even when this week's cell
+    # is still awaiting entry (streaks skip stale/pending weeks by design).
+    if r.red_streak > 0:
+        return (0, -r.red_streak)
+    return (_SEVERITY.get(r.latest_state, 4), 0)
+
+
+def _units(g: BoardSection) -> float:
+    return len(g.rows) + HDR_UNITS + (1 if g.hidden else 0)
+
+
+def _overflow_label(hidden: list) -> str:
+    counts: dict[str, int] = {}
+    for r in sorted(hidden, key=_severity_key):
+        word = _STATE_WORD.get(r.latest_state, "no target")
+        counts[word] = counts.get(word, 0) + 1
+    if set(counts) == {"green"}:
+        return "all green"
+    return " · ".join(f"{n} {w}" for w, n in counts.items())
+
+
+def _fold_one(groups: list[BoardSection]) -> bool:
+    """Hide the greenest row of the largest foldable status section."""
+    target = None
+    for g in groups:
+        if (len(g.rows) > 1
+                and all(r.metric_type == "status" for r in g.rows)
+                and (target is None or len(g.rows) > len(target.rows))):
+            target = g
+    if target is None:
+        return False
+    target.hidden.append(target.rows.pop())
+    target.overflow_state = min(target.hidden, key=_severity_key).latest_state
+    target.overflow_label = _overflow_label(target.hidden)
+    return True
+
+
+def _split_columns(groups: list[BoardSection]) -> list[list[BoardSection]]:
+    if not groups:
+        return []
+    if len(groups) == 1 and len(groups[0].rows) > 8:
+        g = groups[0]
+        half = (len(g.rows) + 1) // 2
+        return [[BoardSection(g.name, g.rows[:half])],
+                [BoardSection("", g.rows[half:], hidden=g.hidden,
+                              overflow_state=g.overflow_state,
+                              overflow_label=g.overflow_label)]]
+    if len(groups) == 1:
+        return [groups]
+    best_k, best_gap = 1, None
+    for k in range(1, len(groups)):
+        gap = abs(sum(map(_units, groups[:k])) - sum(map(_units, groups[k:])))
+        if best_gap is None or gap < best_gap:
+            best_k, best_gap = k, gap
+    return [groups[:best_k], groups[best_k:]]
+
+
+def _layout_board(groups: list[BoardSection]) -> tuple[list, int, int]:
+    for g in groups:
+        if g.rows and all(r.metric_type == "status" for r in g.rows):
+            g.rows.sort(key=_severity_key)
+    while True:
+        columns = _split_columns(groups)
+        worst = max((sum(_units(g) for g in col) for col in columns), default=0.0)
+        if worst <= COL_CAP_UNITS or not _fold_one(groups):
+            break
+    board_rows = max((sum(len(g.rows) + (1 if g.hidden else 0) for g in col)
+                      for col in columns), default=1)
+    board_secs = max((sum(1 for g in col if g.name) for col in columns), default=0)
+    return columns, max(board_rows, 1), board_secs
 
 
 def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
@@ -468,36 +558,17 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 milestones=miles, dri_name=dri_name,
                 initials=(_initials(dri_name) if dri_name != "-" else ""))
 
-    # ---- split sections into two balanced columns, preserving order.
-    # The goal metric keeps its row only when the band cannot render.
+    # ---- group into sections and lay out two balanced columns; worst-first
+    # sort and green-overflow folding happen in _layout_board. The goal
+    # metric keeps its row only when the band cannot render.
     board = [r for r in rows if not (mrr and r.metric_id == mrr_metric_id)]
     groups: list[BoardSection] = []
     for r in board:
         if not groups or groups[-1].name != r.section:
             groups.append(BoardSection(name=r.section, rows=[]))
         groups[-1].rows.append(r)
-
-    hdr = 0.6  # a section label costs roughly this fraction of a row's height
-
-    def units(gs: list[BoardSection]) -> float:
-        return sum(len(g.rows) + hdr for g in gs)
-
-    columns: list[list[BoardSection]] = [groups] if groups else []
-    if len(groups) == 1 and len(groups[0].rows) > 8:
-        half = (len(groups[0].rows) + 1) // 2
-        columns = [[BoardSection(groups[0].name, groups[0].rows[:half])],
-                   [BoardSection("", groups[0].rows[half:])]]
-    elif len(groups) > 1:
-        best_k, best_gap = 1, None
-        for k in range(1, len(groups)):
-            gap = abs(units(groups[:k]) - units(groups[k:]))
-            if best_gap is None or gap < best_gap:
-                best_k, best_gap = k, gap
-        columns = [groups[:best_k], groups[best_k:]]
-
-    board_rows = max((sum(len(g.rows) for g in col) for col in columns), default=1)
-    board_secs = max((sum(1 for g in col if g.name) for col in columns), default=0)
+    columns, board_rows, board_secs = _layout_board(groups)
 
     return TvVM(vm=vm, mrr=mrr, columns=columns,
-                board_rows=max(board_rows, 1), board_secs=board_secs,
+                board_rows=board_rows, board_secs=board_secs,
                 actions=actions[:3], more_actions=max(0, len(actions) - 3))

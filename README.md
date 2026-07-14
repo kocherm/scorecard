@@ -33,8 +33,11 @@ both:
 
 - **TV display mode**: a dark wall board designed for across-the-room reading.
   Goal band (e.g. MRR to $100k) with pace marker, owner chip on every metric,
-  status-colored value chips, 4-week trend dots. Tokenized URL, no login on
-  the TV, refreshes every 60s, survives token rotation, reloads itself daily.
+  status-colored value chips, 4-week trend dots. Client rows sort worst-first;
+  when the client list outgrows the screen, the greenest rows fold into a
+  single "+N all green" row so problems stay visible and the type stays big.
+  Tokenized URL, no login on the TV, refreshes every 60s, survives token
+  rotation, reloads itself daily.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
 - **Scoring**: green >= 100% of target, yellow 70-99%, red < 70%; lower-is-better
   metrics invert; binary metrics are green/red only; status metrics (client

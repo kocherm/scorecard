@@ -430,6 +430,8 @@ body.tvboard .fab:hover, body.tvboard .fab:focus-visible { opacity: 1; }
   letter-spacing: 0.05em; display: inline-flex; align-items: center; justify-content: center; }
 .b-who b { font-size: min(calc(var(--rowh) * 0.25), 1.5vw); font-weight: 500;
   color: var(--mist); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-row.b-more { border-bottom: none; }
+.b-row.b-more .b-name { color: var(--stale); font-weight: 400; }
 
 /* footer: escalation line + legend */
 .b-foot { flex: none; height: 3.6vh; display: flex; align-items: center; gap: 1.8vw;

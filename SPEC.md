@@ -59,6 +59,12 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
   60s via htmx; on a rotated token it bounces through `/tv` to recover; a
   "not updating" badge appears if refreshes stop; hard-reloads every 6h to
   pick up deploys.
+  Status sections (client health) sort worst-first: active red streaks,
+  then yellow, no data, awaiting entry, green last. When a column would
+  push rows below legibility, the greenest rows fold into a single "+N"
+  summary row (chip colored by the worst hidden state) instead of shrinking
+  the type - problems always stay visible, and the edit grid always shows
+  the complete list. Curated numeric sections never fold.
 - **Edit grid** (login): same layout, tap a cell, type one number, done.
 - **Admin**: sections/metrics CRUD (type, DRI, direction, rollup, start week,
   archive), per-quarter targets, users (roles: admin/editor/viewer, temp

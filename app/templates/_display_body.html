@@ -56,6 +56,12 @@
       <span class="b-who">{% if r.initials %}<i class="b-av">{{ r.initials }}</i><b>{{ r.dri_first }}</b>{% endif %}</span>
     </div>
     {% endfor %}
+    {% if sec.hidden %}
+    <div class="b-row b-more">
+      <span class="b-chip {{ sec.overflow_state }}">+{{ sec.hidden|length }}</span>
+      <span class="b-name">{{ sec.overflow_label }}</span>
+    </div>
+    {% endif %}
     {% endfor %}
   </div>
   {% endfor %}
