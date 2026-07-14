@@ -372,7 +372,9 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 initials=(_initials(row.dri_name) if row.dri_name != "-" else ""),
                 latest_display=(use.display if use and use.display else "-"),
                 latest_state=(use.state.value if use and use.raw is not None else
-                              (closed.state.value if closed else "pending")),
+                              (closed.state.value
+                               if closed and closed.state != sc.CellState.NA
+                               else "pending")),
                 week_note=(wnote if latest_raw is not None else ""),
                 cur_state=(cur.state.value if cur else "pending"),
                 target_display=row.target_display,
