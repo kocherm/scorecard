@@ -7,12 +7,12 @@ full-time on an office TV, and readable/writable by AI agents over a JSON API.
 Built with FastAPI, Jinja2, htmx, and SQLite. One container, no build chain, no
 JavaScript framework. A small team can run this for years on a $5 VPS.
 
-![TV display, hybrid view, demo data](docs/screenshot-tv.png)
+![TV board, demo data](docs/screenshot-tv.png)
 
-*The hybrid TV view with demo data: revenue progress track, action cards with
-owners and next steps, the three starred leading indicators, and the weekly
-strip. Four other views (status wall, now-strip, action briefing, founder HUD)
-are one button away.*
+*The TV board with demo data: a goal band with pace marker and milestones,
+then every metric with its owner, latest value vs target, and four weeks of
+trend. Reds carry their escalation step in the ACT line. The board is sized
+in viewport units, so it fills any TV exactly once - no zoom, no scrolling.*
 
 ## Why another scorecard
 
@@ -31,9 +31,10 @@ both:
 
 ## Features
 
-- **TV display mode** with five switchable views (hybrid board, status wall,
-  now-strip, action briefing, founder HUD), cycled with on-screen buttons and
-  configurable in admin. Tokenized URL, no login on the TV, auto-refreshes.
+- **TV display mode**: a dark wall board designed for across-the-room reading.
+  Goal band (e.g. MRR to $100k) with pace marker, owner chip on every metric,
+  status-colored value chips, 4-week trend dots. Tokenized URL, no login on
+  the TV, refreshes every 60s, survives token rotation, reloads itself daily.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
 - **Scoring**: green >= 100% of target, yellow 70-99%, red < 70%; lower-is-better
   metrics invert; binary metrics are green/red only; status metrics (client
@@ -96,11 +97,11 @@ SQLite file. Moving servers = move the volume and the gitignored local files.
 - **Admin > Targets**: baseline + stretch per metric per quarter. Editing a
   target rescores the whole quarter, deliberately: no renegotiating history.
 - **Admin > Users**: add people, change roles, reset passwords, deactivate.
-- **Admin > Settings**: TV display token (rotate any time), months of history
-  shown, which TV views are in rotation, Slack credentials, and the alerts
-  master switch.
-- **TV**: open the display URL on any browser. Bottom-right buttons switch
-  views and jump to edit mode.
+- **Admin > Settings**: TV display token (rotate any time), the TV goal band
+  (which metric, the long-range goal, milestone ticks), months of history in
+  the edit grid, Slack credentials, and the alerts master switch.
+- **TV**: point the TV browser at `/tv` - it redirects to the tokenized
+  display URL. The board sizes itself to the panel; no zoom or scrolling.
 
 ## Agent / automation API
 

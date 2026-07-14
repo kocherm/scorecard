@@ -11,9 +11,10 @@ migrate/seed_data.example.json for the shape.
 ## Core ideas
 
 - **Rolling weeks, no month tabs.** Weeks run Monday-Sunday and roll continuously.
-  The display shows the last 4 calendar months of weekly columns grouped under
-  month header bands, labeled quarter-relative (Q3-W1 ... W13/W14). Nobody ever
-  wonders when a week starts or which sheet tab to open.
+  The edit grid shows the last 2-4 calendar months (admin setting) of weekly
+  columns grouped under month header bands, labeled quarter-relative
+  (Q3-W1 ... W13/W14). Nobody ever wonders when a week starts or which sheet
+  tab to open.
 - **A week belongs to the month/quarter containing its Monday.** One rule drives
   month bands, quarter labels, and target selection.
 - **Nothing derived is stored.** Colors, streaks, staleness, and subtotals are
@@ -48,8 +49,16 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
 
 ## Surfaces
 
-- **TV display** (`/display?token=...`): read-only, no login, tokenized URL,
-  auto-refreshing. Optimized for glanceability across a room.
+- **TV display** (`/tv` redirects to `/display?token=...`): read-only, no
+  login, tokenized URL. One dark board sized in viewport units so it fills
+  any TV exactly once at any resolution or zoom - no scrolling, ever. Top to
+  bottom: goal band (configurable metric, long-range goal, pace marker,
+  milestones), metric rows in two balanced columns (status-colored value chip
+  vs target, owner chip, 4-week trend, red-streak / no-data / last-wk flags),
+  and an ACT footer line with each red's escalation step. Refreshes every
+  60s via htmx; on a rotated token it bounces through `/tv` to recover; a
+  "not updating" badge appears if refreshes stop; hard-reloads every 6h to
+  pick up deploys.
 - **Edit grid** (login): same layout, tap a cell, type one number, done.
 - **Admin**: sections/metrics CRUD (type, DRI, direction, rollup, start week,
   archive), per-quarter targets, users (roles: admin/editor/viewer, temp

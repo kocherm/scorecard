@@ -14,8 +14,26 @@
   </form>
 </div>
 <div class="panel" style="max-width:640px">
+  <h2>TV goal band</h2>
+  <p class="note">The big number and progress track at the top of the TV board. Picks the metric it follows (auto-detects a metric named "MRR" when unset), the long-range goal, and optional milestone ticks along the track.</p>
+  <form method="post" action="/admin/settings/goal-band">
+    <label>Metric</label>
+    <select name="hud_mrr_metric_id">
+      <option value="">Auto-detect (first metric named like "MRR")</option>
+      {% for gm in goal_metrics %}
+      <option value="{{ gm.id }}" {% if hud_mrr_metric_id == gm.id|string %}selected{% endif %}>{{ gm.section }} &middot; {{ gm.name }}</option>
+      {% endfor %}
+    </select>
+    <label>Goal (number only, e.g. 100000)</label>
+    <input type="number" name="mrr_goal" value="{{ mrr_goal }}" placeholder="100000" step="any" min="1" style="max-width:200px">
+    <label>Milestone ticks &mdash; amount:label pairs separated by ;</label>
+    <input type="text" name="mrr_milestones" value="{{ mrr_milestones }}" placeholder="37000:$37k Q3;62000:$62k Q4">
+    <button class="btn" type="submit" style="margin-top:12px">Save</button>
+  </form>
+</div>
+<div class="panel" style="max-width:640px">
   <h2>Display window</h2>
-  <p class="note">How many calendar months of weekly columns the scorecard shows. Fewer months = bigger, calmer board.</p>
+  <p class="note">How many calendar months of weekly columns the edit grid shows. Fewer months = bigger, calmer grid.</p>
   <form method="post" action="/admin/settings/display-months" style="display:flex; gap:10px; align-items:end">
     <div><label>Months visible</label>
       <select name="display_months" style="width:120px">
@@ -24,17 +42,6 @@
         {% endfor %}
       </select></div>
     <button class="btn" type="submit">Save</button>
-  </form>
-  <h3>TV views in rotation</h3>
-  <p class="note">The prev/next buttons on the display cycle through the checked views.</p>
-  <form method="post" action="/admin/settings/display-views">
-    {% for vid, vlabel in all_views %}
-    <label style="display:flex; align-items:center; gap:8px; margin:6px 0">
-      <input type="checkbox" name="views" value="{{ vid }}" {% if vid in enabled_views %}checked{% endif %} style="width:auto">
-      {{ vlabel }}
-    </label>
-    {% endfor %}
-    <button class="btn" type="submit" style="margin-top:10px">Save views</button>
   </form>
 </div>
 <div class="panel" style="max-width:640px">

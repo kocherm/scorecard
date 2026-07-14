@@ -1,88 +1,75 @@
-{% from "_tv_parts.html" import tv_header, act_band, hero_tiles, now_table, client_panel, mrr_track %}
-{{ tv_header(tv, rendered_at) }}
-{% if tv.view == 'wall' %}
-  {{ act_band(tv) }}
-  {{ hero_tiles(tv) }}
-  <div class="tiles">
-    {% for r in tv.strip if not r.is_key and r.metric_type != 'status' %}
-    <div class="tile">
-      <div class="tn">{{ r.name }}{% if r.dri_name != '-' %}<span class="twho">{{ r.dri_name }}</span>{% endif %}</div>
-      <div class="tv2 {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
-      <div class="tt">{% if r.week_note %}{{ r.week_note }}{% if r.target_display != '-' %} &middot; target {{ r.target_display }}{% endif %}{% else %}no data yet{% endif %}</div>
-      <div class="meter"><i class="{{ r.latest_state }}" style="width:{{ r.pct if r.pct is not none else 0 }}%"></i></div>
-    </div>
-    {% endfor %}
+{% set s = tv.vm.summary %}
+<header class="b-head">
+  <span class="seam"></span>
+  <a class="wordmark" href="#" onclick="openAbout(event)" title="About Aprendio">APRENDIO</a>
+  <span class="b-title">Company Scorecard</span>
+  <span class="b-spacer"></span>
+  <span class="b-counts">
+    <span class="c green">{{ s.green }}</span>
+    <span class="c yellow">{{ s.yellow }}</span>
+    <span class="c red">{{ s.red }}</span>
+    <span class="c stale">{{ s.stale }}</span>
+  </span>
+  <span class="b-qweek">{{ tv.vm.quarter_label }}</span>
+  <span class="b-clock">wk of {{ tv.vm.current_week.strftime('%b %-d') }} &middot; {{ rendered_at }}</span>
+</header>
+
+{% if tv.mrr %}
+<section class="b-goal">
+  <div class="bg-numwrap">
+    <div class="bg-eyebrow">Monthly recurring revenue</div>
+    <div class="bg-big">{{ tv.mrr.value_display }}</div>
+    <div class="bg-asof{% if tv.mrr.asof_stale %} warn{% endif %}">{{ tv.mrr.asof_label }}{% if tv.mrr.asof_stale %} &middot; update due{% endif %}</div>
   </div>
-  <div class="chiprow">
-    {% for c in tv.clients %}
-    <span class="pill {{ c.state }}"><span class="dot {{ c.state }}"></span>{{ c.name }}{% if c.dri %} <span class="pwho">&middot; {{ c.dri }}</span>{% endif %}{% if c.note %} &middot; {{ c.note }}{% endif %}</span>
-    {% endfor %}
-  </div>
-{% elif tv.view == 'strip' %}
-  {{ now_table(tv, include_key=true, include_status=true) }}
-{% elif tv.view == 'briefing' %}
-  <div class="brief">
-    <div class="actcol">
-      <div class="abt2">Act on this</div>
-      {% for a in tv.actions %}
-      <div class="bcard {{ 'stale2' if a.kind == 'stale' }}">
-        <span class="btag {{ 'r' if a.kind == 'red' else 's' }}">{{ a.badge }}</span>
-        <div class="bt">{{ a.name }}</div>
-        <div class="bnum">{{ a.value_display }}{% if a.target_display != '-' %} <small>vs {{ a.target_display }}</small>{% endif %}</div>
-        <div class="awho"><span class="avatar">{{ a.initials }}</span> {{ a.dri_name }} &middot; {{ a.next_step }}</div>
-      </div>
-      {% endfor %}
-      {% if not tv.actions %}
-      <div class="bcard allclear"><div class="bt">Nothing needs acting on</div><div class="awho">All metrics updated, none red.</div></div>
+  <div class="bg-trackwrap">
+    <div class="bg-meta">
+      {% if tv.mrr.pace_display != '-' %}
+      <span class="bg-delta {{ tv.mrr.pace_state }}">{{ tv.mrr.delta_display }} vs pace {{ tv.mrr.pace_display }}</span>
       {% endif %}
+      {% if tv.mrr.dri_name != '-' %}
+      <span class="b-who"><i class="b-av">{{ tv.mrr.initials }}</i><b>{{ tv.mrr.dri_name.split()[0] }}</b></span>
+      {% endif %}
+      <span class="bg-goaltag">goal <b>{{ tv.mrr.goal_display }}</b></span>
     </div>
-    <div class="heat card">
-      {% set hsec = namespace(v='') %}
-      {% for r in tv.strip %}
-      {% if r.section != hsec.v %}<div class="hsec">{{ r.section }}</div>{% set hsec.v = r.section %}{% endif %}
-      <div class="hrow">
-        <span class="hn {% if r.is_key %}key{% endif %}"><span class="dot {{ r.dot }}"></span>{{ r.name }}{% if r.is_key %} <span class="star">&#9733;</span>{% endif %}</span>
-        <span class="hwho">{{ r.dri_name if r.dri_name != '-' else '' }}</span>
-        <span class="hist">{% for s in r.spark %}<i class="{{ s.state }}"></i>{% endfor %}<i class="{{ r.cur_state }} now"></i></span>
-        <span class="hv {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</span>
-        <span class="ht">{% if r.target_display != '-' %}/ {{ r.target_display }}{% endif %}</span>
-      </div>
-      {% endfor %}
+    <div class="bg-track">
+      <span class="fill" style="width:{{ tv.mrr.fill_pct }}%"></span>
+      {% if tv.mrr.pace_pct is not none %}<span class="pace" style="left:{{ tv.mrr.pace_pct }}%"><b>pace</b></span>{% endif %}
+      {% for m in tv.mrr.milestones %}<span class="tick" style="left:{{ m.pct }}%"><b>{{ m.label }}</b></span>{% endfor %}
     </div>
   </div>
-{% elif tv.view == 'hud' %}
-  {{ mrr_track(tv) }}
-  <div class="gauges">
-    {% for h in tv.heroes %}
-    <div class="gauge">
-      <div class="ring {{ h.state }}" style="background:conic-gradient(var(--ring-c) 0 {{ h.pct if h.pct is not none else 0 }}%, var(--pearl) {{ h.pct if h.pct is not none else 0 }}% 100%)">
-        <b class="{{ h.state }}">{{ h.pct ~ '%' if h.pct is not none else '&mdash;'|safe }}</b></div>
-      <div>
-        <div class="gt"><span class="star">&#9733;</span> {{ h.name }}</div>
-        <div class="gd"><b class="{{ h.state }}">{{ h.value_display }}</b>{% if h.target_display != '-' %} of {{ h.target_display }}{% endif %} &middot; {{ h.dri_name }} &middot; {{ h.week_note }}</div>
-      </div>
+</section>
+{% endif %}
+
+<section class="b-cols{% if not tv.mrr %} tall{% endif %}{% if tv.columns|length == 1 %} one{% endif %}" style="--rows:{{ tv.board_rows }}; --secs:{{ tv.board_secs if tv.board_secs else 1 }}">
+  {% for col in tv.columns %}
+  <div class="b-col">
+    {% for sec in col %}
+    {% if sec.name %}<div class="b-sec">{{ sec.name }}</div>{% endif %}
+    {% for r in sec.rows %}
+    <div class="b-row">
+      <span class="b-chip {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}{% if r.metric_type == 'numeric' and r.target_display != '-' %}<small>/ {{ r.target_display }}</small>{% endif %}</span>
+      <span class="b-name">{{ r.name }}{% if r.is_key %} <i class="star">&#9733;</i>{% endif %}
+        {%- if r.red_streak >= 1 %} <em class="b-flag red">red wk {{ r.red_streak }}</em>
+        {%- elif r.latest_state == 'stale' %} <em class="b-flag">no data</em>
+        {%- elif r.week_note == 'last week' %} <em class="b-flag">last wk</em>{% endif %}</span>
+      <span class="b-trend">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></span>
+      <span class="b-who">{% if r.initials %}<i class="b-av">{{ r.initials }}</i><b>{{ r.dri_first }}</b>{% endif %}</span>
     </div>
     {% endfor %}
+    {% endfor %}
   </div>
-  <div class="hudfoot">
-    <div class="card hudcard">
-      <div class="ht2">Everything else</div>
-      <div class="hstrip">
-        {% for r in tv.strip if not r.is_key and r.metric_type != 'status' %}
-        <div class="srow"><span class="dot {{ r.dot }}"></span><span class="sn">{{ r.name }}</span>
-          {% if r.dri_name != '-' %}<span class="swho">{{ r.dri_name }}</span>{% endif %}
-          <span class="sv {{ r.latest_state }}">{% if r.latest_display != '-' %}{{ r.latest_display }}{% if r.target_display != '-' %} / {{ r.target_display }}{% endif %}{% else %}not updated{% endif %}</span></div>
-        {% endfor %}
-      </div>
-    </div>
-    {{ client_panel(tv) }}
-  </div>
-{% else %}
-  {{ mrr_track(tv) }}
-  {{ act_band(tv) }}
-  {{ hero_tiles(tv) }}
-  <div class="tv-cols">
-    {{ now_table(tv, include_key=false, include_status=false) }}
-    {{ client_panel(tv) }}
-  </div>
-{% endif %}
+  {% endfor %}
+</section>
+
+<footer class="b-foot">
+  {% if tv.actions %}
+  <span class="b-act-label">Act</span>
+  {% for a in tv.actions %}
+  <span class="b-act"><b class="{{ 'r' if a.kind == 'red' else 's' }}">{{ a.badge }}</b> {{ a.name }} &middot; {{ a.dri_name.split()[0] }} &middot; {{ a.next_step }}</span>
+  {% endfor %}
+  {% if tv.more_actions %}<span class="b-act more">+{{ tv.more_actions }} more</span>{% endif %}
+  {% else %}
+  <span class="b-act clear">All clear &middot; every metric updated, none red</span>
+  {% endif %}
+  <span class="b-legend"><i class="green"></i>on target <i class="yellow"></i>70-99% <i class="red"></i>below 70% <i class="stale"></i>no data</span>
+</footer>

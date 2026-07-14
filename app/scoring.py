@@ -120,7 +120,7 @@ def consecutive_red_weeks(states_desc: list[CellState]) -> int:
 
 
 def escalation_level(red_streak: int) -> int:
-    """0 none; 1 = 1-3-1 due; 2 = 15-min 1:1 with Michael; 3+ = structural."""
+    """0 none; 1 = 1-3-1 due; 2 = 15-min 1:1; 3+ = structural."""
     return min(red_streak, 3)
 
 

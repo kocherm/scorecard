@@ -19,7 +19,7 @@ RED_ALERT_TYPES = {1: "red_week1", 2: "red_week2", 3: "red_week3"}
 
 LADDER_TEXT = {
     1: "Week 1 red: bring a 1-3-1 (one problem, three options, one recommendation) to the weekly sync. File it on the scorecard.",
-    2: "Week 2 red on the same metric: 15-minute 1:1 with Michael this week, outside the sync.",
+    2: "Week 2 red on the same metric: 15-minute 1:1 this week, outside the sync.",
     3: "Week 3+ red: structural conversation. Something about this number's ownership or approach needs to change.",
 }
 

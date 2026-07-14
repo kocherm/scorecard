@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 BUSINESS_TZ = ZoneInfo("America/Chicago")
 
 # Due: prior week's actuals by Monday end of day.
-# Stale: Wednesday 08:00 local after that (confirmed by Michael 2026-07-06).
+# Stale: Wednesday 08:00 local after that (business rule confirmed 2026-07-06).
 STALE_HOUR = 8  # 08:00 on the Wednesday after the deadline Monday
 
 

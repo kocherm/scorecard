@@ -280,61 +280,38 @@ def _check_display_token(con: sqlite3.Connection, token: str) -> None:
         raise HTTPException(403, "Bad display token")
 
 
-DISPLAY_VIEWS = [("hybrid", "Hybrid board"), ("wall", "Status wall"),
-                 ("strip", "Now strip"), ("briefing", "Action briefing"),
-                 ("hud", "Founder HUD")]
-
-
-def _enabled_views(con: sqlite3.Connection) -> list[str]:
-    raw = dbm.get_setting(con, "display_views", "hybrid,wall,strip,briefing,hud")
-    valid = {v for v, _ in DISPLAY_VIEWS}
-    views = [v.strip() for v in raw.split(",") if v.strip() in valid]
-    return views or ["hybrid"]
-
-
-def _tv_for(con: sqlite3.Connection, view: str):
-    now = datetime.now(timezone.utc)
-    enabled = _enabled_views(con)
-    if view not in enabled:
-        view = enabled[0]
-    tv = gridm.build_tv(con, now)
-    tv.view = view
-    if len(enabled) > 1:
-        i = enabled.index(view)
-        tv.prev_view = enabled[(i - 1) % len(enabled)]
-        tv.next_view = enabled[(i + 1) % len(enabled)]
-    return tv, now
-
-
 @app.get("/tv")
-def tv_shortcut(view: str = "", con: sqlite3.Connection = Depends(db_dep)):
+def tv_shortcut(con: sqlite3.Connection = Depends(db_dep)):
     """Typeable shortcut for a TV/kiosk browser: looks up the current display
     token server-side and 302-redirects to /display. 302 (not 301/308) so the
     redirect is never cached and keeps working after the token is rotated."""
     token = dbm.get_setting(con, "display_token") or ""
-    dest = f"/display?token={token}"
-    if view:
-        dest += f"&view={view}"
-    return RedirectResponse(dest, status_code=302)
+    return RedirectResponse(f"/display?token={token}", status_code=302)
+
+
+def _tv_context(con: sqlite3.Connection):
+    now = datetime.now(timezone.utc)
+    return (gridm.build_tv(con, now),
+            now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
 
 
 @app.get("/display", response_class=HTMLResponse)
-def display_page(request: Request, token: str = "", view: str = "",
+def display_page(request: Request, token: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
-    tv, now = _tv_for(con, view)
+    tv, rendered_at = _tv_context(con)
     return render(request, "display.html", tv=tv, token=token,
-                  rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
+                  rendered_at=rendered_at)
 
 
 @app.get("/display/body", response_class=HTMLResponse)
-def display_body(request: Request, token: str = "", view: str = "",
+def display_body(request: Request, token: str = "",
                  con: sqlite3.Connection = Depends(db_dep)):
     _check_display_token(con, token)
-    tv, now = _tv_for(con, view)
+    tv, rendered_at = _tv_context(con)
     html = templates.env.get_template("_display_body.html").render(
-        tv=tv, rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
-    return HTMLResponse(f'<main class="page" id="tvroot">{html}</main>')
+        tv=tv, rendered_at=rendered_at)
+    return HTMLResponse(f'<div class="board" id="tvroot">{html}</div>')
 
 
 # ---------------------------------------------------------------- admin
@@ -585,6 +562,11 @@ def revoke_token(tid: int, user=Depends(require_admin),
 @app.get("/admin/settings", response_class=HTMLResponse)
 def admin_settings(request: Request, user=Depends(require_admin),
                    con: sqlite3.Connection = Depends(db_dep)):
+    goal_metrics = con.execute(
+        """SELECT m.id, m.name, s.name AS section FROM metrics m
+           JOIN sections s ON s.id = m.section_id
+           WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
+           ORDER BY s.sort_order, m.sort_order""").fetchall()
     return render(request, "admin_settings.html", user=user, active="settings",
                   display_token=dbm.get_setting(con, "display_token"),
                   slack_webhook_url=dbm.get_setting(con, "slack_webhook_url") or "",
@@ -592,16 +574,20 @@ def admin_settings(request: Request, user=Depends(require_admin),
                   slack_channel_id=dbm.get_setting(con, "slack_channel_id") or "",
                   alerts_enabled=dbm.get_setting(con, "alerts_enabled", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
-                  all_views=DISPLAY_VIEWS, enabled_views=_enabled_views(con),
+                  goal_metrics=goal_metrics,
+                  hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
+                  mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
+                  mrr_milestones=dbm.get_setting(con, "mrr_milestones") or "",
                   base_url=str(request.base_url).rstrip("/"))
 
 
-@app.post("/admin/settings/display-views")
-def save_display_views(views: list[str] = Form([]), user=Depends(require_admin),
-                       con: sqlite3.Connection = Depends(db_dep)):
-    valid = {v for v, _ in DISPLAY_VIEWS}
-    chosen = [v for v in views if v in valid] or ["hybrid"]
-    dbm.set_setting(con, "display_views", ",".join(chosen))
+@app.post("/admin/settings/goal-band")
+def save_goal_band(hud_mrr_metric_id: str = Form(""), mrr_goal: str = Form(""),
+                   mrr_milestones: str = Form(""), user=Depends(require_admin),
+                   con: sqlite3.Connection = Depends(db_dep)):
+    dbm.set_setting(con, "hud_mrr_metric_id", hud_mrr_metric_id.strip())
+    dbm.set_setting(con, "mrr_goal", mrr_goal.strip())
+    dbm.set_setting(con, "mrr_milestones", mrr_milestones.strip())
     return RedirectResponse("/admin/settings", status_code=303)
 
 
