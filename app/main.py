@@ -17,6 +17,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from migrate import add_admin_scope
+
 from . import alerts, db as dbm, grid as gridm, weeks as wk
 from .api import router as api_router
 from .auth import (SESSION_COOKIE, create_session, destroy_session, hash_password,
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
             con.execute("ALTER TABLE metrics ADD COLUMN is_key INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        # migration for DBs created before api_tokens.scope allowed 'admin'
+        if add_admin_scope.needs_migration(con):
+            add_admin_scope.migrate(con)
+            log.info("Migrated api_tokens.scope to allow 'admin'")
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     scheduler.add_job(alerts.stale_sweep, CronTrigger(

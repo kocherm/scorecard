@@ -72,6 +72,11 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
 - **API** (`/api/v1`): bearer-token access for AI agents and automations.
   GET /scorecard returns full scored state (including stale and red lists);
   POST /metrics/{id}/entries writes values. Same scoring code path as the UI.
+  POST /metrics/{id}/archive retires a row (the soft delete behind "this client
+  churned") and /unarchive restores it; both need an admin-scoped token, because
+  a bad number stays visible and argues with you while a vanished row does not.
+  Archive takes an optional effective_week so a late archive can be backdated to
+  the week the client actually left, instead of leaving gray weeks on the board.
 
 Every surface names the metric's DRI next to the item: TV views, edit grid,
 summary strips, 1-3-1 page, admin pages, and API responses. Accountability is

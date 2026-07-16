@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>API tokens</h1>
-  <p class="page-sub">Bearer tokens for Hermes, n8n, and other integrations. <span class="mono">GET /api/v1/scorecard</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/entries</span></p>
+  <p class="page-sub">Bearer tokens for Hermes, n8n, and other integrations. <span class="mono">GET /api/v1/scorecard</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/entries</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/archive</span> (admin scope only)</p>
 </div>
 {% if new_token %}
 <div class="flash ok">Token <strong>{{ new_name }}</strong> created: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.</div>
@@ -37,6 +37,7 @@
         <option value="read_write">read + write</option>
         <option value="read">read only</option>
         <option value="write">write only</option>
+        <option value="admin">admin (read + write + archive)</option>
       </select></div>
     <button class="btn" type="submit">Create</button>
   </form>

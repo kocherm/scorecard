@@ -89,7 +89,10 @@ require_admin = RequireRole("admin")
 
 
 def api_token_from_request(request: Request, con: sqlite3.Connection,
-                           need_write: bool = False) -> sqlite3.Row:
+                           need_write: bool = False,
+                           need_admin: bool = False) -> sqlite3.Row:
+    """Resolve a bearer token. 'admin' implies write; structural changes
+    (archiving a metric off the board) require it explicitly."""
     auth = request.headers.get("Authorization", "")
     scheme, token = get_authorization_scheme_param(auth)
     if scheme.lower() != "bearer" or not token:
@@ -100,6 +103,8 @@ def api_token_from_request(request: Request, con: sqlite3.Connection,
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=401, detail="Invalid token")
+    if need_admin and row["scope"] != "admin":
+        raise HTTPException(status_code=403, detail="Token lacks admin scope")
     if need_write and row["scope"] == "read":
         raise HTTPException(status_code=403, detail="Token is read-only")
     con.execute("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?", (row["id"],))
