@@ -75,8 +75,11 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
   POST /metrics/{id}/archive retires a row (the soft delete behind "this client
   churned") and /unarchive restores it; both need an admin-scoped token, because
   a bad number stays visible and argues with you while a vanished row does not.
-  Archive takes an optional effective_week so a late archive can be backdated to
-  the week the client actually left, instead of leaving gray weeks on the board.
+  Archiving removes the row from every surface outright - board, edit grid, API,
+  alerts - whatever its archive date. The optional effective_week only records
+  *when* they left; it drives the na-tail in scoring but no shipped view passes
+  include_archived, so today it is an honest date for the record, not a display
+  change.
 
 Every surface names the metric's DRI next to the item: TV views, edit grid,
 summary strips, 1-3-1 page, admin pages, and API responses. Accountability is

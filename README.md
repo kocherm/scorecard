@@ -121,9 +121,10 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   https://scorecard.example.com/api/v1/metrics/1/entries
 
 # retire a row - the soft delete behind "this client churned". Needs an
-# admin-scoped token. History is kept; the metric reads na from the effective
-# week onward. Backdate effective_week to the week they actually left so the
-# trailing "no data" weeks drop off the board instead of lingering gray.
+# admin-scoped token. History is kept, and the row leaves every surface (board,
+# edit grid, API, alerts) regardless of the date below. effective_week records
+# *when* they left; it only changes what a view passing include_archived would
+# render, which today is nothing. Set it honestly, don't expect a display change.
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"effective_week": "2026-06-29"}' \
   https://scorecard.example.com/api/v1/metrics/9/archive

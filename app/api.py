@@ -10,9 +10,12 @@ POST /api/v1/metrics/{id}/archive    {"effective_week": "YYYY-MM-DD" (a Monday,
 POST /api/v1/metrics/{id}/unarchive  admin scope
 
 Archiving is the soft delete behind "remove this client": history is preserved,
-and the metric reads `na` from the effective week onward. Backdate
-effective_week to the week a client actually churned so the trailing "no data"
-weeks drop off the board instead of lingering gray.
+but the row leaves every surface (board, edit grid, API, alerts) outright,
+whatever its archive date - those all filter archived_at IS NULL.
+effective_week records *when* the client left. It drives scoring's na-tail via
+MetricInfo.archived_week, which only surfaces through build_grid's
+include_archived flag; no shipped view passes that today, so treat the field as
+an honest date for the record rather than a display change.
 """
 from __future__ import annotations
 

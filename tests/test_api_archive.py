@@ -102,9 +102,34 @@ def test_archive_works_with_no_body_at_all(env):
         datetime.now(timezone.utc)).isoformat()
 
 
-def test_backdated_archive_is_stored_and_scores_na_from_that_week(env):
+def test_archived_row_leaves_the_board_whatever_the_effective_week(env):
+    """The behaviour that actually ships: every surface filters archived_at IS
+    NULL, so the archive date does not decide whether the row is displayed - it
+    is gone either way. Guards against re-selling effective_week as a display
+    fix."""
     client, tokens = env
-    # three weeks of history, then a churn mid-window
+    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+
+    def board_names():
+        with dbm.get_db() as con:  # default flag = what TV/edit grid/API call
+            vm = gridm.build_grid(con, now)
+        return [r.name for s in vm.sections for r in s.rows]
+
+    assert board_names() == ["Acme Co"]
+    client.post("/api/v1/metrics/1/archive", json={"effective_week": "2026-06-29"},
+                headers=hdr(tokens["admin"]))
+    assert board_names() == []          # backdated: gone
+    client.post("/api/v1/metrics/1/archive", json={"effective_week": "2026-07-13"},
+                headers=hdr(tokens["admin"]))
+    assert board_names() == []          # archived this week: equally gone
+
+
+def test_backdated_archive_scores_na_only_in_the_include_archived_view(env):
+    """effective_week drives scoring's na-tail, but ONLY through
+    build_grid(include_archived=True) - a flag no shipped view passes. This pins
+    the latent behaviour so a future 'show archived history' view can rely on it;
+    it is not evidence of anything users see today."""
+    client, tokens = env
     for w in ("2026-06-22", "2026-06-29", "2026-07-06"):
         client.post("/api/v1/metrics/1/entries", json={"week_start": w, "status": "G"},
                     headers=hdr(tokens["admin"]))
