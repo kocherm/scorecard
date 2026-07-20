@@ -1,0 +1,52 @@
+{# One metric's check-in card. Re-rendered whole after each save (htmx). #}
+{% macro ck_input(row, cell) %}
+{% if row.metric_type == 'status' %}
+<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
+  <button name="value" value="G" class="ck-status g {{ 'sel' if cell.raw == 'G' }}">G</button>
+  <button name="value" value="Y" class="ck-status y {{ 'sel' if cell.raw == 'Y' }}">Y</button>
+  <button name="value" value="R" class="ck-status r {{ 'sel' if cell.raw == 'R' }}">R</button>
+</form>
+{% elif row.metric_type == 'binary' %}
+<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
+  <button name="value" value="1" class="ck-status g {{ 'sel' if cell.raw == 1 }}">Yes</button>
+  <button name="value" value="0" class="ck-status r {{ 'sel' if cell.raw == 0 }}">No</button>
+</form>
+{% else %}
+<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
+  <input type="number" step="any" inputmode="decimal" name="value"
+         value="{{ '%g'|format(cell.raw) if cell.raw is not none else '' }}" placeholder="&ndash;">
+  <button class="btn sm" type="submit">Save</button>
+</form>
+{% endif %}
+{% endmacro %}
+
+{% macro checkin_card(item, vm) %}
+<div class="ck-card {{ 'ck-due-missing' if item.due_missing }}" id="ck-{{ item.row.metric_id }}">
+  <div class="ck-head">
+    <div>
+      <div class="ck-section">{{ item.section }}</div>
+      <div class="ck-name">{{ item.row.name }}</div>
+    </div>
+    <span class="ck-chip {{ item.due.state.value if item.due else 'pending' }}">
+      {{ (item.due.display if item.due and item.due.display else 'missing') if item.due else '' }}
+    </span>
+  </div>
+  {% if item.due %}
+  <div class="ck-week {{ 'missing' if item.due_missing }}">
+    <label>Last week &middot; {{ item.due.week.strftime('%b %-d') }}
+      {%- if item.row.target_display != '-' %} &middot; target {{ item.row.target_display }}{% endif %}
+      {%- if item.due_missing %} &middot; <strong>due now</strong>{% endif %}</label>
+    {{ ck_input(item.row, item.due) }}
+  </div>
+  {% endif %}
+  {% if item.cur %}
+  <div class="ck-week ck-current">
+    <label>This week &middot; {{ item.cur.week.strftime('%b %-d') }} &middot; optional early entry</label>
+    {{ ck_input(item.row, item.cur) }}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}

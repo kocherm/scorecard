@@ -66,9 +66,20 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
   the type - problems always stay visible, and the edit grid always shows
   the complete list. Curated numeric sections never fold.
 - **Edit grid** (login): same layout, tap a cell, type one number, done.
+- **My numbers** (`/checkin`): the one-minute weekly entry surface. Each
+  editor sees only the metrics they own (DRI), missing due-week numbers
+  first and highlighted, big mobile-friendly inputs (one-tap G/Y/R), plus
+  optional early entry for the current week. Logging in lands here
+  automatically whenever numbers are missing; a nav badge shows the count.
+  Slack nudges deep-link here via expiring magic links (`?t=`) that sign
+  the DRI straight in - no password on a phone.
 - **Admin**: sections/metrics CRUD (type, DRI, direction, rollup, start week,
   archive), per-quarter targets, users (roles: admin/editor/viewer, temp
   passwords, deactivate), API tokens, Slack settings, display-token rotation.
+  **View as user**: from the Users page an admin can see the app exactly as
+  any active user does (their role, nav, My Numbers). A loud banner shows
+  while active; edits made during view-as save normally but the audit trail
+  records the real admin. State lives on the session and dies with it.
 - **API** (`/api/v1`): bearer-token access for AI agents and automations.
   GET /scorecard returns full scored state (including stale and red lists);
   POST /metrics/{id}/entries writes values. Same scoring code path as the UI.
@@ -84,6 +95,51 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
 Every surface names the metric's DRI next to the item: TV views, edit grid,
 summary strips, 1-3-1 page, admin pages, and API responses. Accountability is
 never more than a glance away.
+
+## Weekly check-in nudges (two-way messaging)
+
+If enabled (Settings > Check-in nudges; requires the alerts master switch),
+DRIs whose due-week numbers are missing get a message - Monday 16:00 and/or
+Tuesday 09:00 Chicago, each metric nudged at most once per round. Slack is
+the first-class channel; each user's channel is chosen on the Users page:
+
+- The DM numbers their missing metrics with targets, includes a magic link
+  to My Numbers, and shows the reply format.
+- Replying `1: 12, 2: G` records those values directly - parsed by a strict
+  deterministic grammar (index + number / G/Y/R / yes/no), **never by AI** -
+  and a confirmation DM reports the saved values with their scored colors.
+  `help` re-sends the numbered list. Bad items come back itemized.
+- The numbered list each user was shown is pinned server-side
+  (slack_prompts), so filling a metric on the web between nudge and reply
+  can never shift someone's reply onto the wrong metric.
+- Entries land with `source='slack'`, attributed to the replying user.
+- Inbound events are verified with Slack request signing (signing secret,
+  5-minute replay window) and deduplicated by event id.
+- Setup (one-time, documented in Settings): Slack app with bot scopes
+  `chat:write` + `im:history`, Event Subscriptions pointed at
+  `/slack/events` with `message.im` subscribed, signing secret pasted into
+  Settings, public base URL set, member IDs on the Users page.
+
+Additional channels (Settings > More channels, all optional; users whose
+channel is not configured are simply skipped by the sweep):
+
+- **Telegram** - two-way. Bot token from @BotFather; "register webhook"
+  points the bot at `/telegram/webhook` with a generated secret token. A
+  user messages the bot once and it replies with the chat ID to enter on
+  the Users page. Replies write `source='telegram'`.
+- **Twilio SMS / WhatsApp** - two-way. Account SID + auth token + From
+  number; point the number's incoming webhook at `/twilio/webhook`
+  (X-Twilio-Signature verified against the public base URL, reply returned
+  inline as TwiML). Users are matched by normalized phone number; entries
+  write `source='sms'` / `'whatsapp'`.
+- **Microsoft Teams / Google Chat** - notify-only (incoming webhooks post to
+  one shared channel/space; per-user DMs would need a full bot). The post
+  leads with the owner's name, lists their missing metrics, and carries the
+  magic link; no reply parsing.
+
+All two-way channels share one reply pipeline (`app/replies.py`) and the
+pinned prompt list, so the grammar, confirmations, and safety rules are
+identical everywhere. Email is deliberately not implemented yet.
 
 ## Demo data mode
 

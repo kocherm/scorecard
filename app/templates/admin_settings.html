@@ -70,9 +70,71 @@
     <input type="text" name="slack_channel_id" value="{{ slack_channel_id }}" placeholder="C0123456789">
     <label>Incoming webhook URL (optional alternative to bot+channel)</label>
     <input type="text" name="slack_webhook_url" value="{{ slack_webhook_url }}" placeholder="https://hooks.slack.com/services/...">
+    <label>Signing secret (needed for two-way replies)</label>
+    <input type="password" name="slack_signing_secret" value="{{ slack_signing_secret }}" placeholder="From the Slack app's Basic Information page">
     <div style="margin-top:14px; display:flex; gap:10px">
       <button class="btn" type="submit">Save</button>
       <button class="btn secondary" formaction="/admin/settings/slack-test">Save &amp; send test message</button>
+    </div>
+  </form>
+</div>
+<div class="panel" style="max-width:640px">
+  <div style="display:flex; align-items:center; gap:12px">
+    <h2 style="margin:0">Check-in nudges</h2>
+    <span class="chip {{ 'on' if nudges_enabled else 'off' }}">{{ 'ENABLED' if nudges_enabled else 'DISABLED' }}</span>
+    <form method="post" action="/admin/settings/nudges-toggle" style="margin-left:auto">
+      <button class="btn {{ 'danger' if nudges_enabled else '' }} sm">{{ 'Disable nudges' if nudges_enabled else 'Enable nudges' }}</button>
+    </form>
+  </div>
+  <p class="note" style="margin-top:10px">Anyone who has not entered last week's numbers gets a Slack DM listing exactly what is missing, with a one-tap link to their My&nbsp;Numbers page &mdash; and they can simply reply <span class="mono">1: 12, 2: G</span> to record values straight from Slack (no AI involved; replies are parsed literally). Nudges go out Monday 4:00&nbsp;PM and/or Tuesday 9:00&nbsp;AM Chicago, each metric nudged at most once per round. Requires the Slack alerts master switch ON, plus below: the public URL for links, and for typed replies the signing secret above and this one-time Slack app setup &mdash; at <span class="mono">api.slack.com/apps</span>: bot scopes <span class="mono">chat:write</span> + <span class="mono">im:history</span>; Event Subscriptions ON with Request URL <span class="mono">{{ public_base_url or base_url }}/slack/events</span>; subscribe to bot event <span class="mono">message.im</span>; reinstall the app. Each user's Slack member ID is set on the Users page.</p>
+  <form method="post" action="/admin/settings/nudges">
+    <label>Public base URL (used in DM links; no trailing slash)</label>
+    <input type="text" name="public_base_url" value="{{ public_base_url }}" placeholder="{{ base_url }}">
+    <label>Schedule</label>
+    <select name="nudge_preset" style="max-width:280px">
+      <option value="mon_tue" {% if nudge_preset == 'mon_tue' %}selected{% endif %}>Monday 4pm + Tuesday 9am (both)</option>
+      <option value="mon" {% if nudge_preset == 'mon' %}selected{% endif %}>Monday 4pm only</option>
+      <option value="tue" {% if nudge_preset == 'tue' %}selected{% endif %}>Tuesday 9am only</option>
+    </select>
+    <div style="margin-top:14px; display:flex; gap:10px">
+      <button class="btn" type="submit">Save</button>
+      <button class="btn secondary" formaction="/admin/settings/nudge-test">Send me a test nudge</button>
+    </div>
+  </form>
+</div>
+<div class="panel" style="max-width:640px">
+  <h2>More channels</h2>
+  <p class="note">Optional alternatives to Slack for the check-in nudges above; pick each person's channel on the Users page and anyone whose channel is not configured is simply skipped. Typed replies (<span class="mono">1: 12, 2: G</span>) work over Telegram and Twilio SMS/WhatsApp; Microsoft Teams and Google Chat post to a shared channel naming the owner, and the link still takes them to their My&nbsp;Numbers page. Configure only what you use &mdash; blank sections are ignored.</p>
+  <form method="post" action="/admin/settings/channels">
+    <details>
+      <summary>Microsoft Teams</summary>
+      <label>Incoming webhook URL (posts to one team channel)</label>
+      <input type="text" name="teams_webhook_url" value="{{ channel_settings.teams_webhook_url }}" placeholder="https://&hellip;.webhook.office.com/&hellip;">
+    </details>
+    <details>
+      <summary>WhatsApp / SMS (Twilio)</summary>
+      <label>Account SID</label>
+      <input type="text" name="twilio_account_sid" value="{{ channel_settings.twilio_account_sid }}" placeholder="AC&hellip;">
+      <label>Auth token</label>
+      <input type="password" name="twilio_auth_token" value="{{ channel_settings.twilio_auth_token }}">
+      <label>From number ("+15551234567", or "whatsapp:+14155238886")</label>
+      <input type="text" name="twilio_from" value="{{ channel_settings.twilio_from }}" placeholder="+15551234567">
+      <p class="note">For typed replies, set the number's incoming-message webhook in the Twilio console to <span class="mono">{{ public_base_url or base_url }}/twilio/webhook</span> (HTTP POST). Requires the public base URL above.</p>
+    </details>
+    <details>
+      <summary>Google Chat</summary>
+      <label>Space webhook URL (posts to one space)</label>
+      <input type="text" name="gchat_webhook_url" value="{{ channel_settings.gchat_webhook_url }}" placeholder="https://chat.googleapis.com/v1/spaces/&hellip;">
+    </details>
+    <details>
+      <summary>Telegram</summary>
+      <label>Bot token (from @BotFather)</label>
+      <input type="password" name="telegram_bot_token" value="{{ channel_settings.telegram_bot_token }}" placeholder="123456:ABC-&hellip;">
+      <p class="note">"Save &amp; register Telegram webhook" points the bot at this server for typed replies (uses the public base URL above). Each user then messages the bot once &mdash; it replies with the chat ID to enter on the Users page.</p>
+    </details>
+    <div style="margin-top:14px; display:flex; gap:10px">
+      <button class="btn" type="submit">Save</button>
+      <button class="btn secondary" formaction="/admin/settings/telegram-register">Save &amp; register Telegram webhook</button>
     </div>
   </form>
 </div>

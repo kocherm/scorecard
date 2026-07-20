@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS users (
     role          TEXT    NOT NULL CHECK (role IN ('admin','editor','viewer')),
     is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
     slack_member_id TEXT,
+    -- Where check-in nudges reach this user: 'slack' (default, uses
+    -- slack_member_id) or teams/gchat/sms/whatsapp/telegram (notify_address
+    -- holds the phone number / Telegram chat ID; unused for teams/gchat).
+    notify_channel  TEXT,
+    notify_address  TEXT,
     must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0,1)),
     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -17,7 +22,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at   TEXT NOT NULL,
-    last_seen_at TEXT
+    last_seen_at TEXT,
+    -- set while an admin is "viewing as" another user; audit stays on user_id
+    impersonate_user_id INTEGER REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
@@ -74,15 +81,16 @@ CREATE TABLE IF NOT EXISTS entries (
     week_start    TEXT    NOT NULL CHECK (strftime('%w', week_start) = '1'),
     value_numeric REAL,
     value_status  TEXT    CHECK (value_status IN ('R','Y','G')),
-    source        TEXT    NOT NULL CHECK (source IN ('manual','api')),
+    source        TEXT    NOT NULL CHECK (source IN
+                    ('manual','api','slack','telegram','sms','whatsapp')),
     entered_by_user_id  INTEGER REFERENCES users(id),
     entered_by_token_id INTEGER REFERENCES api_tokens(id),
     created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (metric_id, week_start),
     CHECK ((value_numeric IS NULL) <> (value_status IS NULL)),
-    CHECK ((source = 'manual' AND entered_by_user_id IS NOT NULL)
-        OR (source = 'api'    AND entered_by_token_id IS NOT NULL))
+    CHECK ((source = 'api' AND entered_by_token_id IS NOT NULL)
+        OR (source <> 'api' AND entered_by_user_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_entries_week ON entries(week_start);
 
@@ -118,9 +126,31 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
     metric_id  INTEGER NOT NULL REFERENCES metrics(id) ON DELETE CASCADE,
     week_start TEXT    NOT NULL,
     alert_type TEXT    NOT NULL CHECK (alert_type IN
-                 ('stale','red_week1','red_week2','red_week3')),
+                 ('stale','red_week1','red_week2','red_week3','nudge1','nudge2')),
     sent_at    TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (metric_id, week_start, alert_type)
+);
+
+-- Pre-authenticated check-in links delivered over Slack DM. Multi-use until
+-- expiry (Slack's link crawler would burn single-use tokens); hash stored.
+CREATE TABLE IF NOT EXISTS magic_links (
+    id           INTEGER PRIMARY KEY,
+    token_hash   TEXT    NOT NULL UNIQUE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    expires_at   TEXT    NOT NULL,
+    last_used_at TEXT
+);
+
+-- The numbered metric list each user was shown in their last nudge message
+-- (named for Slack, shared by every two-way channel: Telegram, SMS/WhatsApp).
+-- Reply indices resolve against THIS list, never a recomputed one, so a
+-- metric filled on the web between nudge and reply can't shift the numbering.
+CREATE TABLE IF NOT EXISTS slack_prompts (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    week_start TEXT NOT NULL,
+    metric_ids TEXT NOT NULL,  -- JSON array, 1-based order as numbered in the DM
+    sent_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (

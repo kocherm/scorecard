@@ -15,6 +15,9 @@
   <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio" width="36" height="36"></a>
   <nav>
     <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
+    {% if user and user['role'] != 'viewer' %}
+    <a href="/checkin" title="My numbers" class="{% if active == 'checkin' %}active{% endif %}">{{ icon('check') }}{% if request.state.checkin_missing %}<span class="nav-badge">{{ request.state.checkin_missing }}</span>{% endif %}</a>
+    {% endif %}
     {% if user and user['role'] == 'admin' %}
     <a href="/admin/metrics" title="Sections &amp; Metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('sliders') }}</a>
     <a href="/admin/targets" title="Targets" class="{% if active == 'targets' %}active{% endif %}">{{ icon('target') }}</a>
@@ -31,6 +34,12 @@
 </aside>
 {% endblock %}
 <main class="page">
+{% if request.state.impersonator %}
+<div class="viewas-bar">
+  <span>Viewing as <strong>{{ user['display_name'] }}</strong> ({{ user['role'] }}) &mdash; you see exactly what they see; anything you save is recorded as {{ request.state.impersonator['display_name'] }}.</span>
+  <form method="post" action="/impersonate/stop"><button class="btn sm">Exit view-as</button></form>
+</div>
+{% endif %}
 {% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>

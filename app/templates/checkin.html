@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_checkin_row.html" import checkin_card %}
+{% block title %}My numbers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">{{ vm.quarter_label }} &middot; week of {{ vm.last_closed.strftime('%B %-d') }} due{% if demo_on %} &middot; demo data{% endif %}</div>
+  <h1>My numbers</h1>
+  <p class="page-sub">
+    {% if demo_on %}Demo data is on: these are a fictional company's metrics. Anything you save lands in the throwaway demo copy only.
+    {% elif missing %}{{ missing }} number{{ '' if missing == 1 else 's' }} still missing for last week &mdash; fill the highlighted card{{ '' if missing == 1 else 's' }} and you're done.
+    {% else %}All caught up: last week is fully entered. You can enter this week's numbers early below.{% endif %}
+  </p>
+</div>
+{% if not items %}
+<div class="panel" style="max-width:640px"><p class="note">No metrics are assigned to you yet. An admin can set you as the owner (DRI) of a metric under Admin &rarr; Metrics.</p></div>
+{% else %}
+<div class="ck-list">
+  {% for item in items %}{{ checkin_card(item, vm) }}{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

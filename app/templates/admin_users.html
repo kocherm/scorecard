@@ -11,7 +11,7 @@
 {% endif %}
 <div class="panel">
   <table class="list">
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Slack member ID</th><th>Status</th><th></th></tr>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Notifications</th><th>Status</th><th></th></tr>
     {% for u in users %}
     <tr>
       <td>{{ u['display_name'] }}</td>
@@ -26,13 +26,24 @@
         </form>
       </td>
       <td>
-        <form method="post" action="/admin/users/{{ u['id'] }}/slack" style="display:flex; gap:6px">
-          <input type="text" name="slack_member_id" value="{{ u['slack_member_id'] or '' }}" placeholder="U0123ABC" style="width:120px">
+        {% set ch = u['notify_channel'] or 'slack' %}
+        <form method="post" action="/admin/users/{{ u['id'] }}/notify" style="display:flex; gap:6px">
+          <select name="notify_channel" title="Where this user's check-in nudges go">
+            {% for key, label in [('slack','Slack'), ('telegram','Telegram'), ('sms','SMS'), ('whatsapp','WhatsApp'), ('teams','Teams'), ('gchat','Google Chat')] %}
+            <option value="{{ key }}" {% if ch == key %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" name="address" value="{{ (u['slack_member_id'] if ch == 'slack' else u['notify_address']) or '' }}" placeholder="U0123ABC / +1555&hellip; / chat ID" style="width:130px" title="Slack member ID, phone number, or Telegram chat ID; not needed for Teams/Google Chat">
           <button class="btn secondary sm">Save</button>
         </form>
       </td>
       <td><span class="chip {{ 'on' if u['is_active'] else 'off' }}">{{ 'active' if u['is_active'] else 'deactivated' }}</span></td>
       <td style="white-space:nowrap">
+        {% if u['is_active'] and u['id'] != user['id'] %}
+        <form method="post" action="/admin/users/{{ u['id'] }}/impersonate" style="display:inline">
+          <button class="btn secondary sm" title="See the app exactly as {{ u['display_name'] }} sees it">View as</button>
+        </form>
+        {% endif %}
         <form method="post" action="/admin/users/{{ u['id'] }}/reset" style="display:inline">
           <button class="btn secondary sm">Reset password</button>
         </form>

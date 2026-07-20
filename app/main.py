@@ -7,6 +7,7 @@ import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -17,12 +18,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from migrate import add_admin_scope
+from migrate import add_admin_scope, slack_two_way
 
-from . import alerts, db as dbm, demo, grid as gridm, weeks as wk
+from . import (alerts, channels, db as dbm, demo, entry_ops, grid as gridm,
+               weeks as wk)
 from .api import router as api_router
-from .auth import (SESSION_COOKIE, create_session, destroy_session, hash_password,
-                   new_api_token, require_admin, require_editor, require_viewer,
+from .inbound import router as inbound_router
+from .slack import router as slack_router
+from .auth import (SESSION_COOKIE, consume_magic_link, create_magic_link,
+                   create_session, destroy_session, hash_password, new_api_token,
+                   require_admin, require_editor, require_viewer, session_hash,
                    user_from_request, verify_password)
 from .db import db_dep
 
@@ -53,6 +58,22 @@ async def lifespan(app: FastAPI):
         if add_admin_scope.needs_migration(con):
             add_admin_scope.migrate(con)
             log.info("Migrated api_tokens.scope to allow 'admin'")
+        # additive columns for DBs created before view-as-user / channels
+        for ddl in ("ALTER TABLE sessions ADD COLUMN "
+                    "impersonate_user_id INTEGER REFERENCES users(id)",
+                    "ALTER TABLE users ADD COLUMN notify_channel TEXT",
+                    "ALTER TABLE users ADD COLUMN notify_address TEXT"):
+            try:
+                con.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
+        # migrations for DBs created before two-way Slack existed
+        if slack_two_way.needs_entries_migration(con):
+            slack_two_way.migrate_entries(con)
+            log.info("Migrated entries.source to allow 'slack'")
+        if slack_two_way.needs_alerts_migration(con):
+            slack_two_way.migrate_alerts(con)
+            log.info("Migrated alerts_sent.alert_type to allow nudges")
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     scheduler.add_job(alerts.stale_sweep, CronTrigger(
@@ -61,11 +82,22 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(alerts.red_sweep, CronTrigger(
         day_of_week="tue", hour=8, minute=0, timezone="America/Chicago"),
         id="red_sweep", replace_existing=True)
+    # Check-in nudge DMs. Always registered; enable/preset are checked inside
+    # the job (same pattern as alerts_enabled) so settings changes need no
+    # rescheduling. Monday 16:00 = "due tonight"; Tuesday 09:00 = last call
+    # before the Wednesday 08:00 stale sweep.
+    scheduler.add_job(partial(alerts.nudge_sweep, "nudge1"), CronTrigger(
+        day_of_week="mon", hour=16, minute=0, timezone="America/Chicago"),
+        id="nudge1", replace_existing=True)
+    scheduler.add_job(partial(alerts.nudge_sweep, "nudge2"), CronTrigger(
+        day_of_week="tue", hour=9, minute=0, timezone="America/Chicago"),
+        id="nudge2", replace_existing=True)
 
     def prune_sessions():
         with dbm.get_db() as con:
-            con.execute("DELETE FROM sessions WHERE expires_at < ?",
-                        (datetime.now(timezone.utc).isoformat(),))
+            now_iso = datetime.now(timezone.utc).isoformat()
+            con.execute("DELETE FROM sessions WHERE expires_at < ?", (now_iso,))
+            con.execute("DELETE FROM magic_links WHERE expires_at < ?", (now_iso,))
 
     scheduler.add_job(prune_sessions, CronTrigger(
         day_of_week="sun", hour=3, minute=0, timezone="America/Chicago"),
@@ -78,6 +110,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Aprendio Scorecard", lifespan=lifespan, docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 app.include_router(api_router)
+app.include_router(slack_router)
+app.include_router(inbound_router)
 
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
@@ -85,19 +119,29 @@ def render(request: Request, name: str, **ctx) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------- demo mode
-def data_db_dep():
+def data_db_dep(con: sqlite3.Connection = Depends(db_dep)):
     """Connection the board surfaces (grid, TV, cells, 1-3-1s) read AND write.
     Normally the real DB; the throwaway demo DB while 'Display Demo Data' is
     on. Auth, admin pages, alerts, and the JSON API always use db_dep - the
     toggle itself lives in the real DB, so real data can never be touched
-    through a demo surface."""
-    with dbm.get_db() as con:
-        if dbm.get_setting(con, "display_demo_data", "0") != "1":
-            yield con
-            return
-        months = dbm.get_setting(con, "display_months", "2")
+    through a demo surface.
+
+    Built ON TOP of db_dep so FastAPI's per-request dependency cache hands out
+    the SAME real connection the auth guard already used. A second connection
+    here would deadlock: the auth guard's last_seen_at update holds the write
+    lock until its dependency teardown, which only runs after the response."""
+    if dbm.get_setting(con, "display_demo_data", "0") != "1":
+        yield con
+        return
+    months = dbm.get_setting(con, "display_months", "2")
     with demo.demo_db(datetime.now(timezone.utc), months) as dcon:
         yield dcon
+
+
+def _real_actor(request: Request, user: sqlite3.Row) -> sqlite3.Row:
+    """The account actually driving the browser: the impersonating admin when
+    view-as is active, else the session user. Audit rows always name them."""
+    return getattr(request.state, "impersonator", None) or user
 
 
 def _data_actor_id(con: sqlite3.Connection, user: sqlite3.Row) -> Optional[int]:
@@ -157,6 +201,14 @@ def login(request: Request, email: str = Form(...), password: str = Form(...),
     _login_failures.pop(key, None)
     token = create_session(con, row["id"])
     dest = "/account" if row["must_change_password"] else "/"
+    # DRIs with numbers still missing land straight on the check-in page.
+    # Suppressed in demo mode: /checkin would show demo data, and steering
+    # someone there to "fix" real numbers would be a lie.
+    if (dest == "/" and row["role"] != "viewer"
+            and dbm.get_setting(con, "display_demo_data", "0") != "1"
+            and entry_ops.missing_due_metrics(con, row["id"],
+                                              datetime.now(timezone.utc))):
+        dest = "/checkin"
     resp = RedirectResponse(dest, status_code=303)
     resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
                     max_age=30 * 86400, secure=request.url.scheme == "https")
@@ -251,23 +303,86 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
     w = wk.parse_week(week)
     if w > wk.current_week(datetime.now(timezone.utc)):
         raise HTTPException(422, "Future week")
-    actor = _data_actor_id(con, user)
-    if m["metric_type"] == "status":
-        if value not in ("R", "Y", "G"):
-            raise HTTPException(422)
-        dbm.upsert_entry(con, metric_id, w, value_status=value,
-                         source="manual", user_id=actor)
-    else:
-        if value.strip() == "":
-            dbm.delete_entry(con, metric_id, w, user_id=actor)
-        else:
-            v = float(value)
-            if m["metric_type"] == "binary":
-                v = 1.0 if v else 0.0
-            dbm.upsert_entry(con, metric_id, w, value_numeric=v,
-                             source="manual", user_id=actor)
+    actor = _data_actor_id(con, _real_actor(request, user))
+    try:
+        entry_ops.save_value(con, m, w, value, source="manual", user_id=actor)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     con.commit()
     return _render_cell(request, con, metric_id, w)
+
+
+# ---------------------------------------------------------------- my numbers
+def _checkin_items(con: sqlite3.Connection, uid: Optional[int], now: datetime):
+    """The (effective) user's owned metrics as check-in cards: due-week cell,
+    current-week cell, missing-first ordering."""
+    vm = gridm.build_grid(con, now)
+    items = []
+    for s in vm.sections:
+        for r in s.rows:
+            if r.dri_user_id != uid:
+                continue
+            due = next((c for c in r.cells if c.week == vm.last_closed), None)
+            cur = next((c for c in r.cells if c.week == vm.current_week), None)
+            items.append({
+                "row": r, "section": s.name, "due": due, "cur": cur,
+                "due_missing": bool(due and due.raw is None and due.editable),
+            })
+    items.sort(key=lambda i: not i["due_missing"])
+    return vm, items
+
+
+@app.get("/checkin", response_class=HTMLResponse)
+def checkin_page(request: Request, t: str = "",
+                 con: sqlite3.Connection = Depends(data_db_dep),
+                 real: sqlite3.Connection = Depends(db_dep)):
+    """One focused page: enter your own numbers. Reached from the nav, the
+    post-login redirect, or a Slack magic link (?t=) that signs the DRI in."""
+    user = user_from_request(request, real)
+    if user is None:
+        if t:
+            uid = consume_magic_link(real, t)
+            if uid is not None:
+                token = create_session(real, uid)
+                resp = RedirectResponse("/checkin", status_code=303)  # clean URL
+                resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
+                                max_age=30 * 86400,
+                                secure=request.url.scheme == "https")
+                return resp
+        return RedirectResponse("/login", status_code=303)
+    if user["role"] == "viewer":
+        raise HTTPException(403, "Viewers have no numbers to enter")
+    now = datetime.now(timezone.utc)
+    vm, items = _checkin_items(con, _data_actor_id(con, user), now)
+    return render(request, "checkin.html", user=user, vm=vm, items=items,
+                  active="checkin",
+                  missing=sum(1 for i in items if i["due_missing"]),
+                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1")
+
+
+@app.post("/checkin/{metric_id}/{week}", response_class=HTMLResponse)
+def checkin_save(metric_id: int, week: str, request: Request, value: str = Form(""),
+                 user=Depends(require_editor),
+                 con: sqlite3.Connection = Depends(data_db_dep)):
+    m = _metric_or_404(con, metric_id)
+    w = wk.parse_week(week)
+    now = datetime.now(timezone.utc)
+    if w > wk.current_week(now):
+        raise HTTPException(422, "Future week")
+    actor = _data_actor_id(con, _real_actor(request, user))
+    try:
+        entry_ops.save_value(con, m, w, value, source="manual", user_id=actor)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    con.commit()
+    vm, items = _checkin_items(con, _data_actor_id(con, user), now)
+    item = next((i for i in items if i["row"].metric_id == metric_id), None)
+    if item is None:
+        raise HTTPException(404)
+    html = templates.env.from_string(
+        '{% from "_checkin_row.html" import checkin_card %}'
+        '{{ checkin_card(item, vm) }}').render(item=item, vm=vm)
+    return HTMLResponse(html)
 
 
 # ---------------------------------------------------------------- 1-3-1
@@ -305,7 +420,7 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
            (metric_id, week_start, problem, options_json, recommendation, created_by)
            VALUES (?,?,?,?,?,?)""",
         (metric_id, week, problem, json.dumps([option1, option2, option3]),
-         recommendation, _data_actor_id(con, user)))
+         recommendation, _data_actor_id(con, _real_actor(request, user))))
     return RedirectResponse("/", status_code=303)
 
 
@@ -537,11 +652,21 @@ def set_role(uid: int, role: str = Form(...), user=Depends(require_admin),
     return RedirectResponse("/admin/users", status_code=303)
 
 
-@app.post("/admin/users/{uid}/slack")
-def set_slack(uid: int, slack_member_id: str = Form(""), user=Depends(require_admin),
-              con: sqlite3.Connection = Depends(db_dep)):
-    con.execute("UPDATE users SET slack_member_id = ? WHERE id = ?",
-                (slack_member_id.strip() or None, uid))
+@app.post("/admin/users/{uid}/notify")
+def set_notify(uid: int, notify_channel: str = Form("slack"), address: str = Form(""),
+               user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    """One control per user: which channel nudges use and its address.
+    Slack keeps its dedicated column; the rest share notify_address
+    (Teams/Google Chat post to a shared webhook, so no address needed)."""
+    if notify_channel not in channels.CHANNELS:
+        raise HTTPException(422, "Unknown channel")
+    addr = address.strip() or None
+    if notify_channel == "slack":
+        con.execute("UPDATE users SET notify_channel = 'slack', slack_member_id = ? "
+                    "WHERE id = ?", (addr, uid))
+    else:
+        con.execute("UPDATE users SET notify_channel = ?, notify_address = ? "
+                    "WHERE id = ?", (notify_channel, addr, uid))
     return RedirectResponse("/admin/users", status_code=303)
 
 
@@ -552,6 +677,29 @@ def toggle_user(uid: int, user=Depends(require_admin),
         raise HTTPException(400, "Cannot deactivate yourself")
     con.execute("UPDATE users SET is_active = 1 - is_active WHERE id = ?", (uid,))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{uid}/impersonate")
+def impersonate_start(uid: int, request: Request, user=Depends(require_admin),
+                      con: sqlite3.Connection = Depends(db_dep)):
+    """View as user: this session renders as the target until exited. The
+    session row keeps the admin as user_id; audit stays on the real admin."""
+    target = con.execute(
+        "SELECT id FROM users WHERE id = ? AND is_active = 1", (uid,)).fetchone()
+    if target is None:
+        raise HTTPException(404)
+    con.execute("UPDATE sessions SET impersonate_user_id = ? WHERE token_hash = ?",
+                (uid, session_hash(request)))
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/impersonate/stop")
+def impersonate_stop(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    # No role guard: the effective user may be a viewer; the real admin must
+    # always be able to exit. Clearing on a non-impersonating session is a no-op.
+    con.execute("UPDATE sessions SET impersonate_user_id = NULL WHERE token_hash = ?",
+                (session_hash(request),))
     return RedirectResponse("/admin/users", status_code=303)
 
 
@@ -612,6 +760,12 @@ def admin_settings(request: Request, user=Depends(require_admin),
                   alerts_enabled=dbm.get_setting(con, "alerts_enabled", "0") == "1",
                   demo_enabled=dbm.get_setting(con, "display_demo_data", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
+                  slack_signing_secret=dbm.get_setting(con, "slack_signing_secret") or "",
+                  nudges_enabled=dbm.get_setting(con, "nudges_enabled", "0") == "1",
+                  nudge_preset=dbm.get_setting(con, "nudge_preset", "mon_tue"),
+                  public_base_url=dbm.get_setting(con, "public_base_url") or "",
+                  channel_settings={k: dbm.get_setting(con, k) or ""
+                                    for k in _CHANNEL_SETTING_KEYS},
                   goal_metrics=goal_metrics,
                   hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
                   mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
@@ -659,25 +813,109 @@ def alerts_toggle(user=Depends(require_admin), con: sqlite3.Connection = Depends
     return RedirectResponse("/admin/settings", status_code=303)
 
 
-def _save_slack_settings(con, webhook: str, bot: str, channel: str) -> None:
+def _save_slack_settings(con, webhook: str, bot: str, channel: str,
+                         signing: str) -> None:
     dbm.set_setting(con, "slack_webhook_url", webhook.strip())
     dbm.set_setting(con, "slack_bot_token", bot.strip())
     dbm.set_setting(con, "slack_channel_id", channel.strip())
+    dbm.set_setting(con, "slack_signing_secret", signing.strip())
 
 
 @app.post("/admin/settings/slack")
 def save_slack(slack_webhook_url: str = Form(""), slack_bot_token: str = Form(""),
-               slack_channel_id: str = Form(""),
+               slack_channel_id: str = Form(""), slack_signing_secret: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id)
+    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id,
+                         slack_signing_secret)
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+@app.post("/admin/settings/nudges")
+def save_nudges(public_base_url: str = Form(""), nudge_preset: str = Form("mon_tue"),
+                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    dbm.set_setting(con, "public_base_url", public_base_url.strip().rstrip("/"))
+    if nudge_preset in ("mon_tue", "mon", "tue"):
+        dbm.set_setting(con, "nudge_preset", nudge_preset)
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+_CHANNEL_SETTING_KEYS = ("teams_webhook_url", "gchat_webhook_url",
+                         "twilio_account_sid", "twilio_auth_token",
+                         "twilio_from", "telegram_bot_token")
+
+
+def _save_channel_settings(con: sqlite3.Connection, form: dict[str, str]) -> None:
+    for key in _CHANNEL_SETTING_KEYS:
+        dbm.set_setting(con, key, (form.get(key) or "").strip())
+
+
+@app.post("/admin/settings/channels")
+async def save_channels(request: Request, user=Depends(require_admin),
+                        con: sqlite3.Connection = Depends(db_dep)):
+    form = {k: str(v) for k, v in (await request.form()).items()}
+    _save_channel_settings(con, form)
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+@app.post("/admin/settings/telegram-register")
+async def telegram_register(request: Request, user=Depends(require_admin),
+                            con: sqlite3.Connection = Depends(db_dep)):
+    """Save the channel settings, then point the Telegram bot's webhook at
+    this server (with a generated secret token) so typed replies work."""
+    form = {k: str(v) for k, v in (await request.form()).items()}
+    _save_channel_settings(con, form)
+    token = (form.get("telegram_bot_token") or "").strip()
+    base = (dbm.get_setting(con, "public_base_url")
+            or str(request.base_url).rstrip("/"))
+    secret = dbm.get_setting(con, "telegram_webhook_secret")
+    if not secret:
+        secret = secrets.token_urlsafe(24)
+        dbm.set_setting(con, "telegram_webhook_secret", secret)
+    con.commit()
+    if token:
+        try:
+            import httpx
+            r = httpx.post(f"https://api.telegram.org/bot{token}/setWebhook",
+                           json={"url": f"{base}/telegram/webhook",
+                                 "secret_token": secret,
+                                 "allowed_updates": ["message"]}, timeout=10)
+            log.info("telegram setWebhook: %s %s", r.status_code, r.text[:200])
+        except Exception as e:  # network failure must not 500 the settings page
+            log.warning("telegram setWebhook failed: %s", e)
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+@app.post("/admin/settings/nudges-toggle")
+def nudges_toggle(user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    cur = dbm.get_setting(con, "nudges_enabled", "0")
+    dbm.set_setting(con, "nudges_enabled", "0" if cur == "1" else "1")
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+@app.post("/admin/settings/nudge-test")
+def nudge_test(request: Request, user=Depends(require_admin),
+               con: sqlite3.Connection = Depends(db_dep)):
+    """Message the current admin their own nudge, over their chosen channel,
+    exactly as DRIs will get it. No alerts_sent rows, so it can be re-sent
+    any number of times."""
+    base = (dbm.get_setting(con, "public_base_url")
+            or str(request.base_url).rstrip("/"))
+    real = _real_actor(request, user)
+    if channels.ready(con, real):
+        now = datetime.now(timezone.utc)
+        if not alerts.compose_and_send_nudge(con, real, base, now):
+            alerts.send_direct(con, real,
+                               "Test nudge: all your numbers are entered - "
+                               "nothing due right now.")
     return RedirectResponse("/admin/settings", status_code=303)
 
 
 @app.post("/admin/settings/slack-test")
 def slack_test(slack_webhook_url: str = Form(""), slack_bot_token: str = Form(""),
-               slack_channel_id: str = Form(""),
+               slack_channel_id: str = Form(""), slack_signing_secret: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id)
+    _save_slack_settings(con, slack_webhook_url, slack_bot_token, slack_channel_id,
+                         slack_signing_secret)
     con.commit()
     msg = "Aprendio Scorecard: test message. Alerts are wired up."
     if slack_webhook_url.strip():

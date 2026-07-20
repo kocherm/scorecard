@@ -39,6 +39,21 @@ both:
   Tokenized URL, no login on the TV, refreshes every 60s, survives token
   rotation, reloads itself daily.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
+- **My Numbers check-in**: each owner gets a focused mobile-friendly page with
+  just their metrics - missing numbers first, one-tap G/Y/R, big inputs.
+  Logging in lands there whenever something is due; a nav badge counts what's
+  missing.
+- **Two-way check-ins over Slack, Telegram, WhatsApp/SMS**: owners who haven't
+  entered numbers get a message listing exactly what's missing, with a magic
+  link straight into My Numbers - and they can just reply `1: 12, 2: G` to
+  record values from the chat. Replies are parsed by a strict grammar (no AI),
+  confirmed back with the scored colors, and attributed in the audit trail.
+  Each person picks their channel on the Users page; Microsoft Teams and
+  Google Chat are supported as notify-only channels (webhook post naming the
+  owner, magic link included).
+- **View as user**: admins can see the app exactly as any teammate does (role,
+  nav, My Numbers) behind a loud banner; edits made while viewing-as are
+  audited to the real admin.
 - **Scoring**: green >= 100% of target, yellow 70-99%, red < 70%; lower-is-better
   metrics invert; binary metrics are green/red only; status metrics (client
   health) are set directly as R/Y/G.
@@ -107,7 +122,12 @@ SQLite file. Moving servers = move the volume and the gitignored local files.
 - **Admin > Users**: add people, change roles, reset passwords, deactivate.
 - **Admin > Settings**: TV display token (rotate any time), the TV goal band
   (which metric, the long-range goal, milestone ticks), months of history in
-  the edit grid, Slack credentials, and the alerts master switch.
+  the edit grid, Slack credentials, the alerts master switch, and check-in
+  nudges (schedule, public base URL, signing secret; the panel walks through
+  the one-time Slack app setup for two-way replies). A collapsed "More
+  channels" panel holds the optional Teams / Twilio (WhatsApp+SMS) /
+  Google Chat / Telegram config - including one-click Telegram webhook
+  registration; each user's channel is picked on the Users page.
 - **TV**: point the TV browser at `/tv` - it redirects to the tokenized
   display URL. The board sizes itself to the panel; no zoom or scrolling.
 
