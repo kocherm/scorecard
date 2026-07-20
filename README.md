@@ -50,6 +50,11 @@ both:
 - **Agent API**: bearer-token JSON API returning fully scored state (including
   who is stale and what is red) and accepting metric writes. Ideal for wiring up
   an AI agent or n8n/Zapier flows to feed metrics automatically.
+- **Demo data mode**: one admin toggle fills the TV board and edit grid with a
+  fictional company - generated relative to the current week and scripted to
+  show off every feature - for screenshots and screen recordings. Real data
+  lives untouched in a separate database throughout; alerts and the API keep
+  using it.
 - **Full audit trail**: every write is recorded; retroactive edits recompute all
   colors and streaks but never rewrite history.
 

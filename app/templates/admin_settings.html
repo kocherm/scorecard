@@ -14,6 +14,16 @@
   </form>
 </div>
 <div class="panel" style="max-width:640px">
+  <div style="display:flex; align-items:center; gap:12px">
+    <h2 style="margin:0">Demo data</h2>
+    <span class="chip {{ 'on' if demo_enabled else 'off' }}">{{ 'ON' if demo_enabled else 'OFF' }}</span>
+    <form method="post" action="/admin/settings/demo-toggle" style="margin-left:auto">
+      <button class="btn {{ 'danger' if demo_enabled else '' }} sm">{{ 'Turn off demo data' if demo_enabled else 'Show demo data' }}</button>
+    </form>
+  </div>
+  <p class="note" style="margin-top:10px">Fills the board and TV display with a fictional company &mdash; for screenshots, screen recordings, and product demos. Your real data is never modified: the demo lives in a separate throwaway database, rebuilt fresh each time this is switched on (and each new week). Edits made on the grid while it is on land in the demo copy only. Login, admin pages, Slack alerts, and the JSON API keep using real data throughout. The TV display URL above keeps working and shows the demo while enabled.</p>
+</div>
+<div class="panel" style="max-width:640px">
   <h2>TV goal band</h2>
   <p class="note">The big number and progress track at the top of the TV board. Picks the metric it follows (auto-detects a metric named "MRR" when unset), the long-range goal, and optional milestone ticks along the track.</p>
   <form method="post" action="/admin/settings/goal-band">

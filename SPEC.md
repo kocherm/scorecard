@@ -85,6 +85,27 @@ Every surface names the metric's DRI next to the item: TV views, edit grid,
 summary strips, 1-3-1 page, admin pages, and API responses. Accountability is
 never more than a glance away.
 
+## Demo data mode
+
+Admin > Settings > "Demo data" fills the board surfaces (TV display, edit
+grid, cell editing, 1-3-1s) with a fictional company for screenshots, screen
+recordings, and product demos. Rules:
+
+- Real data is never modified. The demo lives in a separate throwaway SQLite
+  file (`demo.db` next to the real DB); the toggle itself is the only thing
+  written to the real DB.
+- The dataset is generated relative to the current week and scripted to show
+  every capability at once: a climbing MRR goal band, mostly-green momentum
+  with sparklines, yellows, a two-week red (15-min 1:1 due), a fresh red
+  awaiting its 1-3-1, an escalated client with its 1-3-1 filed, a stale gray
+  cell in history, and enough clients that the TV folds the greenest rows.
+- Edits made while the toggle is on land in the demo copy - so the editing
+  workflow itself can be demoed - and are discarded on rebuild.
+- The demo DB is rebuilt fresh each time the toggle turns on, each new week,
+  and whenever the generator version changes.
+- Login, admin pages, Slack alerts, and the JSON API always use real data;
+  the TV display URL (real token) keeps working and shows the demo while on.
+
 ## Review cadence (methodology, enforced socially not in code)
 
 Weekly sync, scorecard first, discuss only yellows and reds. Green means no

@@ -17,7 +17,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import alerts, db as dbm, grid as gridm, weeks as wk
+from migrate import add_admin_scope
+
+from . import alerts, db as dbm, demo, grid as gridm, weeks as wk
 from .api import router as api_router
 from .auth import (SESSION_COOKIE, create_session, destroy_session, hash_password,
                    new_api_token, require_admin, require_editor, require_viewer,
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
             con.execute("ALTER TABLE metrics ADD COLUMN is_key INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        # migration for DBs created before api_tokens.scope allowed 'admin'
+        if add_admin_scope.needs_migration(con):
+            add_admin_scope.migrate(con)
+            log.info("Migrated api_tokens.scope to allow 'admin'")
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     scheduler.add_job(alerts.stale_sweep, CronTrigger(
@@ -76,6 +82,32 @@ app.include_router(api_router)
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
     return templates.TemplateResponse(request, name, ctx)
+
+
+# ---------------------------------------------------------------- demo mode
+def data_db_dep():
+    """Connection the board surfaces (grid, TV, cells, 1-3-1s) read AND write.
+    Normally the real DB; the throwaway demo DB while 'Display Demo Data' is
+    on. Auth, admin pages, alerts, and the JSON API always use db_dep - the
+    toggle itself lives in the real DB, so real data can never be touched
+    through a demo surface."""
+    with dbm.get_db() as con:
+        if dbm.get_setting(con, "display_demo_data", "0") != "1":
+            yield con
+            return
+        months = dbm.get_setting(con, "display_months", "2")
+    with demo.demo_db(datetime.now(timezone.utc), months) as dcon:
+        yield dcon
+
+
+def _data_actor_id(con: sqlite3.Connection, user: sqlite3.Row) -> Optional[int]:
+    """Audit attribution that also works while writes land in the demo DB,
+    whose users table differs from the real one the session user lives in."""
+    if con.execute("SELECT 1 FROM users WHERE id = ?", (user["id"],)).fetchone():
+        return user["id"]
+    row = con.execute(
+        "SELECT id FROM users ORDER BY role = 'admin' DESC, id LIMIT 1").fetchone()
+    return row["id"] if row else None
 
 
 @app.exception_handler(HTTPException)
@@ -164,11 +196,13 @@ def change_password(request: Request, current: str = Form(...), new: str = Form(
 # ---------------------------------------------------------------- scorecard
 @app.get("/", response_class=HTMLResponse)
 def grid_page(request: Request, user=Depends(require_viewer),
-              con: sqlite3.Connection = Depends(db_dep)):
+              con: sqlite3.Connection = Depends(data_db_dep),
+              real: sqlite3.Connection = Depends(db_dep)):
     vm = gridm.build_grid(con, datetime.now(timezone.utc))
     return render(request, "grid.html", user=user, vm=vm, active="grid",
                   can_edit=user["role"] in ("editor", "admin"),
-                  display_token=dbm.get_setting(con, "display_token"))
+                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1",
+                  display_token=dbm.get_setting(real, "display_token"))
 
 
 def _metric_or_404(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
@@ -198,7 +232,7 @@ def _render_cell(request: Request, con: sqlite3.Connection, metric_id: int,
 @app.get("/cell/{metric_id}/{week}/edit", response_class=HTMLResponse)
 def cell_edit_form(metric_id: int, week: str, request: Request,
                    user=Depends(require_editor),
-                   con: sqlite3.Connection = Depends(db_dep)):
+                   con: sqlite3.Connection = Depends(data_db_dep)):
     m = _metric_or_404(con, metric_id)
     w = wk.parse_week(week)
     e = con.execute("SELECT * FROM entries WHERE metric_id=? AND week_start=?",
@@ -212,25 +246,26 @@ def cell_edit_form(metric_id: int, week: str, request: Request,
 @app.post("/cell/{metric_id}/{week}", response_class=HTMLResponse)
 def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...),
               user=Depends(require_editor),
-              con: sqlite3.Connection = Depends(db_dep)):
+              con: sqlite3.Connection = Depends(data_db_dep)):
     m = _metric_or_404(con, metric_id)
     w = wk.parse_week(week)
     if w > wk.current_week(datetime.now(timezone.utc)):
         raise HTTPException(422, "Future week")
+    actor = _data_actor_id(con, user)
     if m["metric_type"] == "status":
         if value not in ("R", "Y", "G"):
             raise HTTPException(422)
         dbm.upsert_entry(con, metric_id, w, value_status=value,
-                         source="manual", user_id=user["id"])
+                         source="manual", user_id=actor)
     else:
         if value.strip() == "":
-            dbm.delete_entry(con, metric_id, w, user_id=user["id"])
+            dbm.delete_entry(con, metric_id, w, user_id=actor)
         else:
             v = float(value)
             if m["metric_type"] == "binary":
                 v = 1.0 if v else 0.0
             dbm.upsert_entry(con, metric_id, w, value_numeric=v,
-                             source="manual", user_id=user["id"])
+                             source="manual", user_id=actor)
     con.commit()
     return _render_cell(request, con, metric_id, w)
 
@@ -239,7 +274,7 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
 @app.get("/131/{metric_id}/{week}", response_class=HTMLResponse)
 def one_three_one_page(metric_id: int, week: str, request: Request,
                        user=Depends(require_editor),
-                       con: sqlite3.Connection = Depends(db_dep)):
+                       con: sqlite3.Connection = Depends(data_db_dep)):
     m = _metric_or_404(con, metric_id)
     w = wk.parse_week(week)
     dri = con.execute(
@@ -262,7 +297,7 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
                        option2: str = Form(...), option3: str = Form(...),
                        recommendation: str = Form(...),
                        user=Depends(require_editor),
-                       con: sqlite3.Connection = Depends(db_dep)):
+                       con: sqlite3.Connection = Depends(data_db_dep)):
     _metric_or_404(con, metric_id)
     wk.parse_week(week)
     con.execute(
@@ -270,7 +305,7 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
            (metric_id, week_start, problem, options_json, recommendation, created_by)
            VALUES (?,?,?,?,?,?)""",
         (metric_id, week, problem, json.dumps([option1, option2, option3]),
-         recommendation, user["id"]))
+         recommendation, _data_actor_id(con, user)))
     return RedirectResponse("/", status_code=303)
 
 
@@ -280,49 +315,40 @@ def _check_display_token(con: sqlite3.Connection, token: str) -> None:
         raise HTTPException(403, "Bad display token")
 
 
-DISPLAY_VIEWS = [("hybrid", "Hybrid board"), ("wall", "Status wall"),
-                 ("strip", "Now strip"), ("briefing", "Action briefing"),
-                 ("hud", "Founder HUD")]
+@app.get("/tv")
+def tv_shortcut(con: sqlite3.Connection = Depends(db_dep)):
+    """Typeable shortcut for a TV/kiosk browser: looks up the current display
+    token server-side and 302-redirects to /display. 302 (not 301/308) so the
+    redirect is never cached and keeps working after the token is rotated."""
+    token = dbm.get_setting(con, "display_token") or ""
+    return RedirectResponse(f"/display?token={token}", status_code=302)
 
 
-def _enabled_views(con: sqlite3.Connection) -> list[str]:
-    raw = dbm.get_setting(con, "display_views", "hybrid,wall,strip,briefing,hud")
-    valid = {v for v, _ in DISPLAY_VIEWS}
-    views = [v.strip() for v in raw.split(",") if v.strip() in valid]
-    return views or ["hybrid"]
-
-
-def _tv_for(con: sqlite3.Connection, view: str):
+def _tv_context(con: sqlite3.Connection):
     now = datetime.now(timezone.utc)
-    enabled = _enabled_views(con)
-    if view not in enabled:
-        view = enabled[0]
-    tv = gridm.build_tv(con, now)
-    tv.view = view
-    if len(enabled) > 1:
-        i = enabled.index(view)
-        tv.prev_view = enabled[(i - 1) % len(enabled)]
-        tv.next_view = enabled[(i + 1) % len(enabled)]
-    return tv, now
+    return (gridm.build_tv(con, now),
+            now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
 
 
 @app.get("/display", response_class=HTMLResponse)
-def display_page(request: Request, token: str = "", view: str = "",
-                 con: sqlite3.Connection = Depends(db_dep)):
-    _check_display_token(con, token)
-    tv, now = _tv_for(con, view)
+def display_page(request: Request, token: str = "",
+                 real: sqlite3.Connection = Depends(db_dep),
+                 con: sqlite3.Connection = Depends(data_db_dep)):
+    _check_display_token(real, token)
+    tv, rendered_at = _tv_context(con)
     return render(request, "display.html", tv=tv, token=token,
-                  rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
+                  rendered_at=rendered_at)
 
 
 @app.get("/display/body", response_class=HTMLResponse)
-def display_body(request: Request, token: str = "", view: str = "",
-                 con: sqlite3.Connection = Depends(db_dep)):
-    _check_display_token(con, token)
-    tv, now = _tv_for(con, view)
+def display_body(request: Request, token: str = "",
+                 real: sqlite3.Connection = Depends(db_dep),
+                 con: sqlite3.Connection = Depends(data_db_dep)):
+    _check_display_token(real, token)
+    tv, rendered_at = _tv_context(con)
     html = templates.env.get_template("_display_body.html").render(
-        tv=tv, rendered_at=now.astimezone(wk.BUSINESS_TZ).strftime("%-I:%M %p"))
-    return HTMLResponse(f'<main class="page" id="tvroot">{html}</main>')
+        tv=tv, rendered_at=rendered_at)
+    return HTMLResponse(f'<div class="board" id="tvroot">{html}</div>')
 
 
 # ---------------------------------------------------------------- admin
@@ -573,23 +599,33 @@ def revoke_token(tid: int, user=Depends(require_admin),
 @app.get("/admin/settings", response_class=HTMLResponse)
 def admin_settings(request: Request, user=Depends(require_admin),
                    con: sqlite3.Connection = Depends(db_dep)):
+    goal_metrics = con.execute(
+        """SELECT m.id, m.name, s.name AS section FROM metrics m
+           JOIN sections s ON s.id = m.section_id
+           WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
+           ORDER BY s.sort_order, m.sort_order""").fetchall()
     return render(request, "admin_settings.html", user=user, active="settings",
                   display_token=dbm.get_setting(con, "display_token"),
                   slack_webhook_url=dbm.get_setting(con, "slack_webhook_url") or "",
                   slack_bot_token=dbm.get_setting(con, "slack_bot_token") or "",
                   slack_channel_id=dbm.get_setting(con, "slack_channel_id") or "",
                   alerts_enabled=dbm.get_setting(con, "alerts_enabled", "0") == "1",
+                  demo_enabled=dbm.get_setting(con, "display_demo_data", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
-                  all_views=DISPLAY_VIEWS, enabled_views=_enabled_views(con),
+                  goal_metrics=goal_metrics,
+                  hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
+                  mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
+                  mrr_milestones=dbm.get_setting(con, "mrr_milestones") or "",
                   base_url=str(request.base_url).rstrip("/"))
 
 
-@app.post("/admin/settings/display-views")
-def save_display_views(views: list[str] = Form([]), user=Depends(require_admin),
-                       con: sqlite3.Connection = Depends(db_dep)):
-    valid = {v for v, _ in DISPLAY_VIEWS}
-    chosen = [v for v in views if v in valid] or ["hybrid"]
-    dbm.set_setting(con, "display_views", ",".join(chosen))
+@app.post("/admin/settings/goal-band")
+def save_goal_band(hud_mrr_metric_id: str = Form(""), mrr_goal: str = Form(""),
+                   mrr_milestones: str = Form(""), user=Depends(require_admin),
+                   con: sqlite3.Connection = Depends(db_dep)):
+    dbm.set_setting(con, "hud_mrr_metric_id", hud_mrr_metric_id.strip())
+    dbm.set_setting(con, "mrr_goal", mrr_goal.strip())
+    dbm.set_setting(con, "mrr_milestones", mrr_milestones.strip())
     return RedirectResponse("/admin/settings", status_code=303)
 
 
@@ -604,6 +640,15 @@ def save_display_months(display_months: int = Form(...), user=Depends(require_ad
 def rotate_display_token(user=Depends(require_admin),
                          con: sqlite3.Connection = Depends(db_dep)):
     dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
+    return RedirectResponse("/admin/settings", status_code=303)
+
+
+@app.post("/admin/settings/demo-toggle")
+def demo_toggle(user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    turning_on = dbm.get_setting(con, "display_demo_data", "0") != "1"
+    dbm.set_setting(con, "display_demo_data", "1" if turning_on else "0")
+    if turning_on:
+        demo.reset()  # fresh fictional data every time it is switched on
     return RedirectResponse("/admin/settings", status_code=303)
 
 
