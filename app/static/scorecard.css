@@ -277,6 +277,7 @@ table.list tr:last-child td { border-bottom: none; }
 .chip.editor { background: rgba(49,130,206,0.1); color: #2b6cb0; }
 .chip.viewer { background: var(--pearl); color: var(--slate); }
 .chip.off { background: var(--pearl); color: var(--silver); }
+.chip.warn-late { background: var(--amber-subtle); color: var(--amber-deep); font-weight: 700; }
 .chip.on { background: var(--green-subtle); color: var(--green-deep); }
 
 /* ---- collapsed settings sections (progressive disclosure) ---- */
@@ -333,6 +334,13 @@ table.list tr:last-child td { border-bottom: none; }
 .ck-status.y.sel { background: var(--amber); border-color: var(--amber); color: #fff; }
 .ck-status.r.sel { background: var(--red); border-color: var(--red); color: #fff; }
 .ck-status:hover { border-color: var(--slate); }
+.ck-card details.ck-earlier { border-top: 1px dashed var(--cloud); margin-top: 8px; padding-top: 6px; }
+.ck-card details.ck-earlier summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--slate); padding: 2px 0;
+}
+.ck-card details.ck-earlier summary strong { color: var(--amber-deep); }
+.ck-card details.ck-earlier summary:hover { color: var(--accent-hover); }
+.ck-card details.ck-earlier[open] summary { margin-bottom: 4px; }
 @media (max-width: 600px) {
   .ck-list { max-width: none; }
   .ck-form input[type="number"] { width: 100%; }

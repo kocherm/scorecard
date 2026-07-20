@@ -115,6 +115,38 @@ def test_nav_badge_counts_missing(env):
     assert "nav-badge" not in client.get("/").text
 
 
+def test_earlier_weeks_are_listed_and_catchup_saves_with_audit(env):
+    client = env
+    login(client)
+    r = client.get("/checkin")
+    assert "Earlier weeks" in r.text and "no data" in r.text
+
+    gap = (wk.parse_week(due_week()) - timedelta(days=14)).isoformat()
+    r = client.post(f"/checkin/1/{gap}", data={"value": "7"})
+    assert r.status_code == 200
+    with dbm.get_db() as con:
+        e = con.execute("SELECT * FROM entries WHERE metric_id=1 AND week_start=?",
+                        (gap,)).fetchone()
+        a = con.execute("SELECT * FROM entry_audit WHERE metric_id=1 AND week_start=?",
+                        (gap,)).fetchone()
+    assert e["value_numeric"] == 7.0
+    assert a["old_numeric"] is None and a["new_numeric"] == 7.0  # first entry
+
+
+def test_correction_keeps_old_value_in_the_audit_trail(env):
+    client = env
+    login(client)
+    client.post(f"/checkin/1/{due_week()}", data={"value": "12"})
+    client.post(f"/checkin/1/{due_week()}", data={"value": "15"})
+    with dbm.get_db() as con:
+        assert con.execute("SELECT value_numeric FROM entries WHERE metric_id=1")\
+                  .fetchone()["value_numeric"] == 15.0
+        audits = con.execute(
+            "SELECT * FROM entry_audit WHERE metric_id=1 ORDER BY id").fetchall()
+    assert len(audits) == 2
+    assert audits[1]["old_numeric"] == 12.0 and audits[1]["new_numeric"] == 15.0
+
+
 def test_demo_mode_isolates_checkin_and_suppresses_redirect(env):
     client = env
     with dbm.get_db() as con:

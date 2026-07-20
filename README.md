@@ -40,9 +40,10 @@ both:
   rotation, reloads itself daily.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
 - **My Numbers check-in**: each owner gets a focused mobile-friendly page with
-  just their metrics - missing numbers first, one-tap G/Y/R, big inputs.
-  Logging in lands there whenever something is due; a nav badge counts what's
-  missing.
+  just their metrics - missing numbers first, one-tap G/Y/R, big inputs, and
+  a fold-out of earlier weeks for catching up on gaps or correcting a number
+  after the fact. Logging in lands there whenever something is due; a nav
+  badge counts what's missing.
 - **Two-way check-ins over Slack, Telegram, WhatsApp/SMS**: owners who haven't
   entered numbers get a message listing exactly what's missing, with a magic
   link straight into My Numbers - and they can just reply `1: 12, 2: G` to
@@ -70,8 +71,11 @@ both:
   show off every feature - for screenshots and screen recordings. Real data
   lives untouched in a separate database throughout; alerts and the API keep
   using it.
-- **Full audit trail**: every write is recorded; retroactive edits recompute all
-  colors and streaks but never rewrite history.
+- **Full audit trail**: every write is recorded (old value, new value, real
+  actor - even during view-as - and channel); retroactive edits recompute all
+  colors and streaks but never rewrite history. Admin > Activity shows the
+  trail, with a LATE chip on anything written after the week's staleness
+  deadline.
 
 ## Quick start (local)
 

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Activity</h1>
+  <p class="page-sub">Every write to the scorecard, newest first (last 200). Retroactive edits and late back-fills are part of the workflow &mdash; but they are never invisible: changes made after a week's Wednesday-8am staleness deadline carry a LATE chip, and edits made while viewing as someone else are attributed to the real admin.</p>
+</div>
+<div class="panel">
+  {% if not items %}
+  <p class="note">No entries have been written yet.</p>
+  {% else %}
+  <table class="list">
+    <tr><th>When</th><th>Metric</th><th>Week</th><th>Change</th><th>By</th><th>Via</th><th></th></tr>
+    {% for i in items %}
+    <tr>
+      <td style="white-space:nowrap">{{ i.when }}</td>
+      <td>{{ i.metric }}</td>
+      <td style="white-space:nowrap">{{ i.week|qlabel }} &middot; {{ i.week.strftime('%b %-d') }}</td>
+      <td class="mono">
+        {% if i.old and i.new %}{{ i.old }} &rarr; {{ i.new }}
+        {% elif i.new %}entered {{ i.new }}
+        {% elif i.old %}cleared (was {{ i.old }})
+        {% else %}&ndash;{% endif %}
+      </td>
+      <td>{{ i.by }}</td>
+      <td><span class="chip {{ 'on' if i.source == 'manual' else 'editor' }}">{{ i.source }}</span></td>
+      <td>{% if i.late %}<span class="chip warn-late">LATE</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

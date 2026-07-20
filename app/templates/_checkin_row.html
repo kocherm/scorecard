@@ -23,7 +23,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro checkin_card(item, vm) %}
+{% macro checkin_card(item, vm, open_earlier=false) %}
 <div class="ck-card {{ 'ck-due-missing' if item.due_missing }}" id="ck-{{ item.row.metric_id }}">
   <div class="ck-head">
     <div>
@@ -47,6 +47,17 @@
     <label>This week &middot; {{ item.cur.week.strftime('%b %-d') }} &middot; optional early entry</label>
     {{ ck_input(item.row, item.cur) }}
   </div>
+  {% endif %}
+  {% if item.earlier %}
+  <details class="ck-earlier" {% if open_earlier or item.earlier_missing %}open{% endif %}>
+    <summary>Earlier weeks{% if item.earlier_missing %} &middot; <strong>{{ item.earlier_missing }} missing</strong>{% endif %}</summary>
+    {% for cell in item.earlier %}
+    <div class="ck-week {{ 'missing' if cell.raw is none }}">
+      <label>{{ cell.week.strftime('%b %-d') }} ({{ cell.week|qlabel }}){% if cell.raw is none %} &middot; <strong>no data</strong>{% endif %}</label>
+      {{ ck_input(item.row, cell) }}
+    </div>
+    {% endfor %}
+  </details>
   {% endif %}
 </div>
 {% endmacro %}

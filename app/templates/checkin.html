@@ -9,6 +9,7 @@
     {% if demo_on %}Demo data is on: these are a fictional company's metrics. Anything you save lands in the throwaway demo copy only.
     {% elif missing %}{{ missing }} number{{ '' if missing == 1 else 's' }} still missing for last week &mdash; fill the highlighted card{{ '' if missing == 1 else 's' }} and you're done.
     {% else %}All caught up: last week is fully entered. You can enter this week's numbers early below.{% endif %}
+    Earlier weeks can be caught up or corrected inside each card; every change is kept in the audit trail.
   </p>
 </div>
 {% if not items %}

@@ -69,10 +69,15 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
 - **My numbers** (`/checkin`): the one-minute weekly entry surface. Each
   editor sees only the metrics they own (DRI), missing due-week numbers
   first and highlighted, big mobile-friendly inputs (one-tap G/Y/R), plus
-  optional early entry for the current week. Logging in lands here
-  automatically whenever numbers are missing; a nav badge shows the count.
-  Slack nudges deep-link here via expiring magic links (`?t=`) that sign
-  the DRI straight in - no password on a phone.
+  optional early entry for the current week. Each card also folds out
+  "Earlier weeks" - the rest of the display window - for catching up on
+  gaps (auto-expanded when any exist) or correcting a number after the
+  fact. Late entry and retroactive correction are legitimate workflow, not
+  cheating-proofed away; instead every write lands in the audit trail and
+  surfaces on Admin > Activity. Logging in lands here automatically
+  whenever numbers are missing; a nav badge shows the count. Nudges
+  deep-link here via expiring magic links (`?t=`) that sign the DRI
+  straight in - no password on a phone.
 - **Admin**: sections/metrics CRUD (type, DRI, direction, rollup, start week,
   archive), per-quarter targets, users (roles: admin/editor/viewer, temp
   passwords, deactivate), API tokens, Slack settings, display-token rotation.
@@ -80,6 +85,11 @@ a number. Each escalation level Slack-notifies exactly once (dedupe table).
   any active user does (their role, nav, My Numbers). A loud banner shows
   while active; edits made during view-as save normally but the audit trail
   records the real admin. State lives on the session and dies with it.
+  **Activity** (`/admin/activity`): the audit trail made visible - last 200
+  writes, old value -> new value, actor (never the impersonated user),
+  source channel, and a LATE chip on anything written after that week's
+  Wednesday-8am staleness deadline. Nothing blocks a late edit; nothing
+  hides one either.
 - **API** (`/api/v1`): bearer-token access for AI agents and automations.
   GET /scorecard returns full scored state (including stale and red lists);
   POST /metrics/{id}/entries writes values. Same scoring code path as the UI.

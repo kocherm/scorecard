@@ -315,7 +315,9 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
 # ---------------------------------------------------------------- my numbers
 def _checkin_items(con: sqlite3.Connection, uid: Optional[int], now: datetime):
     """The (effective) user's owned metrics as check-in cards: due-week cell,
-    current-week cell, missing-first ordering."""
+    current-week cell, plus the earlier weeks of the display window (newest
+    first) for catching up on gaps or correcting numbers after the fact.
+    Missing-first ordering; every save is audited like any other write."""
     vm = gridm.build_grid(con, now)
     items = []
     for s in vm.sections:
@@ -324,11 +326,16 @@ def _checkin_items(con: sqlite3.Connection, uid: Optional[int], now: datetime):
                 continue
             due = next((c for c in r.cells if c.week == vm.last_closed), None)
             cur = next((c for c in r.cells if c.week == vm.current_week), None)
+            earlier = [c for c in r.cells
+                       if c.week < vm.last_closed and c.editable]
+            earlier.reverse()
             items.append({
                 "row": r, "section": s.name, "due": due, "cur": cur,
                 "due_missing": bool(due and due.raw is None and due.editable),
+                "earlier": earlier,
+                "earlier_missing": sum(1 for c in earlier if c.raw is None),
             })
-    items.sort(key=lambda i: not i["due_missing"])
+    items.sort(key=lambda i: (not i["due_missing"], not i["earlier_missing"]))
     return vm, items
 
 
@@ -379,9 +386,12 @@ def checkin_save(metric_id: int, week: str, request: Request, value: str = Form(
     item = next((i for i in items if i["row"].metric_id == metric_id), None)
     if item is None:
         raise HTTPException(404)
+    # Keep the earlier-weeks section open when that's where they just saved,
+    # so multi-week catch-up doesn't collapse the section between edits.
     html = templates.env.from_string(
         '{% from "_checkin_row.html" import checkin_card %}'
-        '{{ checkin_card(item, vm) }}').render(item=item, vm=vm)
+        '{{ checkin_card(item, vm, open_earlier) }}').render(
+        item=item, vm=vm, open_earlier=w < vm.last_closed)
     return HTMLResponse(html)
 
 
@@ -741,6 +751,50 @@ def revoke_token(tid: int, user=Depends(require_admin),
                  con: sqlite3.Connection = Depends(db_dep)):
     con.execute("UPDATE api_tokens SET revoked_at = datetime('now') WHERE id = ?", (tid,))
     return RedirectResponse("/admin/tokens", status_code=303)
+
+
+# ---------------- activity (audit trail)
+def _audit_value(mtype: Optional[str], unit: Optional[str],
+                 numeric, status) -> str:
+    if status is not None:
+        return status
+    if numeric is None:
+        return ""
+    return gridm.fmt_value(mtype or "numeric", unit, numeric)
+
+
+@app.get("/admin/activity", response_class=HTMLResponse)
+def admin_activity(request: Request, user=Depends(require_admin),
+                   con: sqlite3.Connection = Depends(db_dep)):
+    """Every write, old value -> new value, who did it and when. Writes made
+    after the week's Wednesday-8am staleness deadline carry a LATE chip, so
+    quietly back-filling or 'correcting' history is always visible here."""
+    rows = con.execute(
+        """SELECT a.*, m.name AS metric_name, m.metric_type, m.unit,
+                  u.display_name AS actor_name, t.name AS token_name
+           FROM entry_audit a
+           LEFT JOIN metrics m ON m.id = a.metric_id
+           LEFT JOIN users u ON u.id = a.actor_user_id
+           LEFT JOIN api_tokens t ON t.id = a.actor_token_id
+           ORDER BY a.id DESC LIMIT 200""").fetchall()
+    items = []
+    for a in rows:
+        week = date.fromisoformat(a["week_start"])
+        changed = datetime.fromisoformat(a["changed_at"]).replace(tzinfo=timezone.utc)
+        items.append({
+            "when": changed.astimezone(wk.BUSINESS_TZ).strftime("%b %-d, %-I:%M %p"),
+            "metric": a["metric_name"] or f"(deleted #{a['metric_id']})",
+            "week": week,
+            "old": _audit_value(a["metric_type"], a["unit"],
+                                a["old_numeric"], a["old_status"]),
+            "new": _audit_value(a["metric_type"], a["unit"],
+                                a["new_numeric"], a["new_status"]),
+            "by": a["actor_name"] or a["token_name"] or "-",
+            "source": a["source"],
+            "late": changed >= wk.stale_at(week),
+        })
+    return render(request, "admin_activity.html", user=user, active="activity",
+                  items=items)
 
 
 # ---------------- settings
