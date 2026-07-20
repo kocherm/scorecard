@@ -37,4 +37,6 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
 - Passwords/tokens are hashed in DB; temp passwords and API tokens print exactly once.
 - Styling: CSS custom properties in app/static/scorecard.css only - no new hex
   values, no emoji in UI. Brand reference lives outside this repo.
-- Deployment specifics: deploy/DEPLOY.local.md (gitignored).
+- Deployment specifics: deploy/DEPLOY.local.md (gitignored). Same file covers
+  the office TV kiosk (a Pi running WPE/cog pointed at /tv - no desktop, no
+  login; /tv resolves the display token server-side).

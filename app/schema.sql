@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     id           INTEGER PRIMARY KEY,
     name         TEXT    NOT NULL,
     token_hash   TEXT    NOT NULL UNIQUE,
-    scope        TEXT    NOT NULL CHECK (scope IN ('read','write','read_write')),
+    scope        TEXT    NOT NULL CHECK (scope IN ('read','write','read_write','admin')),
     created_by   INTEGER REFERENCES users(id),
     created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
     last_used_at TEXT,

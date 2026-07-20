@@ -112,17 +112,34 @@ SQLite file. Moving servers = move the volume and the gitignored local files.
 # full scored state: values, colors, stale list, red streaks, escalation levels
 curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/scorecard
 
-# list metric ids
+# list metric ids (add ?include_archived=true to see archived ones too)
 curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/metrics
 
 # write a value (week_start optional, defaults to the week that is due)
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"week_start": "2026-07-06", "value": 12}' \
   https://scorecard.example.com/api/v1/metrics/1/entries
+
+# retire a row - the soft delete behind "this client churned". Needs an
+# admin-scoped token. History is kept, and the row leaves every surface (board,
+# edit grid, API, alerts) regardless of the date below. effective_week records
+# *when* they left; it only changes what a view passing include_archived would
+# render, which today is nothing. Set it honestly, don't expect a display change.
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"effective_week": "2026-06-29"}' \
+  https://scorecard.example.com/api/v1/metrics/9/archive
+
+# undo it
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  https://scorecard.example.com/api/v1/metrics/9/unarchive
 ```
 
-Tokens are created in Admin > API, scoped read/write, shown once, revocable.
-API-written cells are attributed to the token in the audit trail.
+Tokens are created in Admin > API, shown once, revocable. Scopes: `read`,
+`write`, `read_write`, and `admin`. Only `admin` may archive - entering a bad
+number is loud and stays on the board, but a row that quietly disappears is
+not, so taking one off the board is deliberately a higher privilege than
+writing to it. API-written cells are attributed to the token in the audit
+trail.
 
 ## Working on this repo with an AI assistant
 

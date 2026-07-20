@@ -1,10 +1,21 @@
 """JSON API for Hermes and other integrations. Bearer token auth.
 
 GET  /api/v1/scorecard           full current state (same scoring as the TV)
-GET  /api/v1/metrics             id/name list for writers
+GET  /api/v1/metrics             id/name list for writers (?include_archived=true)
 POST /api/v1/metrics/{id}/entries  {"week_start": "YYYY-MM-DD" (a Monday, optional,
                                     defaults to last closed week),
                                     "value": number  OR  "status": "R"|"Y"|"G"}
+POST /api/v1/metrics/{id}/archive    {"effective_week": "YYYY-MM-DD" (a Monday,
+                                      optional, defaults to this week)}  admin scope
+POST /api/v1/metrics/{id}/unarchive  admin scope
+
+Archiving is the soft delete behind "remove this client": history is preserved,
+but the row leaves every surface (board, edit grid, API, alerts) outright,
+whatever its archive date - those all filter archived_at IS NULL.
+effective_week records *when* the client left. It drives scoring's na-tail via
+MetricInfo.archived_week, which only surfaces through build_grid's
+include_archived flag; no shipped view passes that today, so treat the field as
+an honest date for the record rather than a display change.
 """
 from __future__ import annotations
 
@@ -81,14 +92,16 @@ def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep))
 
 
 @router.get("/metrics")
-def list_metrics(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+def list_metrics(request: Request, include_archived: bool = False,
+                 con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
+    arch = "" if include_archived else "WHERE m.archived_at IS NULL"
     rows = con.execute(
-        """SELECT m.id, m.name, m.metric_type, m.unit, s.name AS section,
-                  u.display_name AS dri
-           FROM metrics m JOIN sections s ON s.id = m.section_id
-           LEFT JOIN users u ON u.id = m.dri_user_id
-           WHERE m.archived_at IS NULL ORDER BY s.sort_order, m.sort_order"""
+        f"""SELECT m.id, m.name, m.metric_type, m.unit, m.archived_at,
+                   s.name AS section, u.display_name AS dri
+            FROM metrics m JOIN sections s ON s.id = m.section_id
+            LEFT JOIN users u ON u.id = m.dri_user_id
+            {arch} ORDER BY s.sort_order, m.sort_order"""
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -136,3 +149,62 @@ def write_entry(metric_id: int, body: EntryIn, request: Request,
                          source="api", token_id=token["id"])
     return {"ok": True, "metric_id": metric_id, "week_start": week.isoformat(),
             "week_label": wk.quarter_label(week)}
+
+
+class ArchiveIn(BaseModel):
+    effective_week: Optional[str] = None
+
+
+def _metric_row(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
+    m = con.execute("SELECT * FROM metrics WHERE id = ?", (metric_id,)).fetchone()
+    if m is None:
+        raise HTTPException(404, "Unknown metric")
+    return m
+
+
+@router.post("/metrics/{metric_id}/archive")
+def archive_metric(metric_id: int, request: Request,
+                   body: Optional[ArchiveIn] = None,
+                   con: sqlite3.Connection = Depends(db_dep)):
+    """Take a metric off the board from effective_week onward, keeping history.
+
+    Re-archiving an already-archived metric moves the effective week, so a
+    wrong churn date is corrected by calling this again.
+    """
+    api_token_from_request(request, con, need_admin=True)
+    m = _metric_row(con, metric_id)
+    body = body or ArchiveIn()
+
+    now = datetime.now(timezone.utc)
+    if body.effective_week:
+        try:
+            week = wk.parse_week(body.effective_week)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+    else:
+        week = wk.current_week(now)
+    # A future effective week would drop the row from the board immediately while
+    # scoring still counted the weeks in between - refuse rather than half-archive.
+    if week > wk.current_week(now):
+        raise HTTPException(422, "Cannot archive effective a future week")
+    if week < wk.parse_week(m["start_week"]):
+        raise HTTPException(422, f"Metric starts {m['start_week']}")
+
+    was_archived = m["archived_at"] is not None
+    con.execute("UPDATE metrics SET archived_at = ? WHERE id = ?",
+                (week.isoformat(), metric_id))
+    return {"ok": True, "metric_id": metric_id, "name": m["name"],
+            "archived": True, "was_already_archived": was_archived,
+            "effective_week": week.isoformat(),
+            "effective_week_label": wk.quarter_label(week)}
+
+
+@router.post("/metrics/{metric_id}/unarchive")
+def unarchive_metric(metric_id: int, request: Request,
+                     con: sqlite3.Connection = Depends(db_dep)):
+    api_token_from_request(request, con, need_admin=True)
+    m = _metric_row(con, metric_id)
+    was_archived = m["archived_at"] is not None
+    con.execute("UPDATE metrics SET archived_at = NULL WHERE id = ?", (metric_id,))
+    return {"ok": True, "metric_id": metric_id, "name": m["name"],
+            "archived": False, "was_archived": was_archived}
