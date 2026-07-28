@@ -8,3 +8,4 @@ uv.lock
 seed_data.local.json
 SPEC.local.md
 deploy/DEPLOY.local.md
+*.local.json

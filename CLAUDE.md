@@ -8,8 +8,9 @@ Methodology and product rules: SPEC.md.
 
 This repo is public. NOTHING company-specific goes in tracked files: no client or
 staff names, no emails, no revenue figures, no hostnames, IPs, ports, or SSH users.
-Company data lives only in gitignored files: migrate/seed_data.local.json,
-SPEC.local.md, deploy/DEPLOY.local.md. Check `git grep` before every commit.
+Company data lives only in gitignored files: SPEC.local.md,
+deploy/DEPLOY.local.md, and anything matching `*.local.json` (seed data, the
+Slack app manifest). Check `git grep` before every commit.
 
 ## Architecture
 
@@ -61,6 +62,14 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
 - Passwords/tokens are hashed in DB; temp passwords and API tokens print exactly once.
 - Styling: CSS custom properties in app/static/scorecard.css only - no new hex
   values, no emoji in UI. Brand reference lives outside this repo.
+- Slack two-way replies need Scorecard's OWN Slack app - never share a bot user
+  with a chat agent that also lives in the workspace. Slack delivers message.im
+  to exactly one consumer per app, and Socket Mode (what agent gateways use)
+  disables the Events API Request URL outright, so /slack/events is simply never
+  called. Nothing errors: nudges still go out over the shared token, the "reply
+  1: G" line still promises a shortcut that cannot work, and the replies land in
+  the agent instead. Symptom to check first: no rows in entry_audit with
+  source='slack', and no POST /slack/events in the container log.
 - Deployment specifics: deploy/DEPLOY.local.md (gitignored). Same file covers
   the office TV kiosk (a Pi running WPE/cog pointed at /tv - no desktop, no
   login; /tv resolves the display token server-side).
