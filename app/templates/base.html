@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Scorecard{% endblock %} - Aprendio</title>
-<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
+{% include "_head_icons.html" %}
 <link rel="stylesheet" href="/static/scorecard.css?v={{ static_v }}">
 <script src="/static/htmx.min.js" defer></script>
 </head>
@@ -15,12 +15,17 @@
   <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio" width="36" height="36"></a>
   <nav>
     <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
+    {% if user and user['role'] != 'viewer' %}
+    <a href="/checkin" title="My numbers" class="{% if active == 'checkin' %}active{% endif %}">{{ icon('check') }}{% if request.state.checkin_missing %}<span class="nav-badge">{{ request.state.checkin_missing }}</span>{% endif %}</a>
+    {% endif %}
     {% if user and user['role'] == 'admin' %}
     <a href="/admin/metrics" title="Sections &amp; Metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('sliders') }}</a>
     <a href="/admin/targets" title="Targets" class="{% if active == 'targets' %}active{% endif %}">{{ icon('target') }}</a>
     <a href="/admin/users" title="Users" class="{% if active == 'users' %}active{% endif %}">{{ icon('users') }}</a>
     <a href="/admin/tokens" title="API tokens" class="{% if active == 'tokens' %}active{% endif %}">{{ icon('key') }}</a>
+    <a href="/admin/activity" title="Activity (audit trail)" class="{% if active == 'activity' %}active{% endif %}">{{ icon('history') }}</a>
     <a href="/admin/settings" title="Settings" class="{% if active == 'settings' %}active{% endif %}">{{ icon('gear') }}</a>
+    <a href="/admin/status" title="Setup &amp; status" class="{% if active == 'status' %}active{% endif %}">{{ icon('pulse') }}{% if request.state.setup_blocked %}<span class="nav-badge alert">{{ request.state.setup_blocked }}</span>{% endif %}</a>
     {% endif %}
   </nav>
   <div class="grow"></div>
@@ -31,6 +36,12 @@
 </aside>
 {% endblock %}
 <main class="page">
+{% if request.state.impersonator %}
+<div class="viewas-bar">
+  <span>Viewing as <strong>{{ user['display_name'] }}</strong> ({{ user['role'] }}) &mdash; you see exactly what they see; anything you save is recorded as {{ request.state.impersonator['display_name'] }}.</span>
+  <form method="post" action="/impersonate/stop"><button class="btn sm">Exit view-as</button></form>
+</div>
+{% endif %}
 {% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
 {% block content %}{% endblock %}
 </main>

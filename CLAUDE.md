@@ -70,6 +70,12 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
   1: G" line still promises a shortcut that cannot work, and the replies land in
   the agent instead. Symptom to check first: no rows in entry_audit with
   source='slack', and no POST /slack/events in the container log.
+- Brand: brand/scorecard-logo.png is the master; every favicon/app icon under
+  app/static is derived from it (regenerate per README, don't hand-edit). The
+  Slack app's own icon has no API and stays a one-time upload; what the app sets
+  is icon_url per message, which needs chat:write.customize. alerts._post_message
+  retries once without the icon on a scope error - never let the avatar become a
+  way for a nudge to fail silently.
 - Deployment specifics: deploy/DEPLOY.local.md (gitignored). Same file covers
   the office TV kiosk (a Pi running WPE/cog pointed at /tv - no desktop, no
   login; /tv resolves the display token server-side).

@@ -49,12 +49,19 @@ def destroy_session(con: sqlite3.Connection, token: str) -> None:
     con.execute("DELETE FROM sessions WHERE token_hash = ?", (_sha256(token),))
 
 
+def session_hash(request: Request) -> Optional[str]:
+    """Hash of the current session cookie, for targeting this session's row."""
+    token = request.cookies.get(SESSION_COOKIE)
+    return _sha256(token) if token else None
+
+
 def user_from_request(request: Request, con: sqlite3.Connection) -> Optional[sqlite3.Row]:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
     row = con.execute(
-        """SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+        """SELECT u.*, s.impersonate_user_id FROM sessions s
+           JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = ? AND s.expires_at > ? AND u.is_active = 1""",
         (_sha256(token), datetime.now(timezone.utc).isoformat()),
     ).fetchone()
@@ -63,6 +70,31 @@ def user_from_request(request: Request, con: sqlite3.Connection) -> Optional[sql
             "UPDATE sessions SET last_seen_at = datetime('now') WHERE token_hash = ?",
             (_sha256(token),),
         )
+    # View-as-user: an admin's session may carry an impersonation target. The
+    # effective user is returned (so role checks, nav, and every surface match
+    # what the target sees); the real admin rides along on request.state for
+    # the banner and for audit attribution. Fails safe: a demoted admin or a
+    # deactivated/deleted target falls back to the real identity.
+    if row and row["impersonate_user_id"] and row["role"] == "admin":
+        target = con.execute(
+            "SELECT * FROM users WHERE id = ? AND is_active = 1",
+            (row["impersonate_user_id"],)).fetchone()
+        if target is not None:
+            request.state.impersonator = row
+            row = target
+    if row is not None and row["role"] != "viewer":
+        # Nav badge: how many of the (effective) user's numbers are still
+        # missing for the due week. Real DB by design, even in demo mode.
+        from . import entry_ops
+        request.state.checkin_missing = len(entry_ops.missing_due_metrics(
+            con, row["id"], datetime.now(timezone.utc)))
+    if row is not None and row["role"] == "admin":
+        # Nav badge: how many setup checks are blocking. Local checks and the
+        # cached verification results only - all DB reads, no network, or every
+        # admin page would wait on Slack.
+        from . import readiness
+        request.state.setup_blocked = readiness.blocked_count(
+            con, datetime.now(timezone.utc))
     return row
 
 
@@ -88,17 +120,61 @@ require_editor = RequireRole("editor")
 require_admin = RequireRole("admin")
 
 
+# ---------------------------------------------------------------- magic links
+MAGIC_LINK_DAYS = 7
+
+
+def create_magic_link(con: sqlite3.Connection, user_id: int,
+                      days: int = MAGIC_LINK_DAYS) -> str:
+    """Pre-authenticated check-in link token (delivered over Slack DM).
+    Multi-use until expiry: Slack's link crawler may GET the URL before the
+    human does, so single-use tokens would be burned on arrival."""
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    con.execute(
+        "INSERT INTO magic_links (token_hash, user_id, expires_at) VALUES (?,?,?)",
+        (_sha256(token), user_id, expires))
+    return token
+
+
+def consume_magic_link(con: sqlite3.Connection, token: str) -> Optional[int]:
+    """user_id for a valid unexpired link belonging to an active user, else None."""
+    row = con.execute(
+        """SELECT ml.user_id FROM magic_links ml
+           JOIN users u ON u.id = ml.user_id
+           WHERE ml.token_hash = ? AND ml.expires_at > ? AND u.is_active = 1""",
+        (_sha256(token), datetime.now(timezone.utc).isoformat())).fetchone()
+    if row is None:
+        return None
+    con.execute("UPDATE magic_links SET last_used_at = datetime('now') "
+                "WHERE token_hash = ?", (_sha256(token),))
+    return row["user_id"]
+
+
 def api_token_from_request(request: Request, con: sqlite3.Connection,
                            need_write: bool = False,
                            need_admin: bool = False) -> sqlite3.Row:
-    """Resolve a bearer token. 'admin' implies write; structural changes
-    (archiving a metric off the board) require it explicitly."""
+    """Resolve a bearer token from the Authorization header."""
     auth = request.headers.get("Authorization", "")
     scheme, token = get_authorization_scheme_param(auth)
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Bearer token required")
+    return api_token_from_value(con, token, need_write, need_admin)
+
+
+def api_token_from_value(con: sqlite3.Connection, token: str,
+                         need_write: bool = False,
+                         need_admin: bool = False) -> sqlite3.Row:
+    """Resolve a raw token string. 'admin' implies write; structural changes
+    (archiving a metric off the board) require it explicitly.
+
+    Split out from the header path so a caller that carries the token
+    somewhere other than a header - the MCP endpoint's URL form, for
+    connector UIs that accept only a URL - still lands on one scope check."""
     row = con.execute(
-        "SELECT * FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL",
+        """SELECT * FROM api_tokens
+           WHERE token_hash = ? AND revoked_at IS NULL
+             AND (expires_at IS NULL OR expires_at > datetime('now'))""",
         (_sha256(token),),
     ).fetchone()
     if row is None:
@@ -112,10 +188,42 @@ def api_token_from_request(request: Request, con: sqlite3.Connection,
 
 
 def new_api_token(con: sqlite3.Connection, name: str, scope: str,
-                  created_by: Optional[int]) -> str:
+                  created_by: Optional[int],
+                  rotated_from_id: Optional[int] = None) -> str:
     token = "sc_" + secrets.token_urlsafe(32)
     con.execute(
-        "INSERT INTO api_tokens (name, token_hash, scope, created_by) VALUES (?,?,?,?)",
-        (name, _sha256(token), scope, created_by),
+        """INSERT INTO api_tokens (name, token_hash, scope, created_by, rotated_from_id)
+           VALUES (?,?,?,?,?)""",
+        (name, _sha256(token), scope, created_by, rotated_from_id),
     )
     return token
+
+
+ROTATE_GRACE_DAYS = 7
+ROTATE_GRACE_MAX = 90
+
+
+def rotate_api_token(con: sqlite3.Connection, tid: int, grace_days: int,
+                     created_by: Optional[int]) -> str:
+    """Mint a replacement for token `tid` keeping its name and scope, and put
+    the old secret on a grace clock instead of killing it outright - the
+    integration keeps working until you have pasted the new value in.
+
+    Rotating an already-rotated token is a no-op error rather than a chain of
+    overlapping secrets: revoke or wait out the grace window first."""
+    old = con.execute("SELECT * FROM api_tokens WHERE id = ?", (tid,)).fetchone()
+    if old is None:
+        raise ValueError("No such token")
+    if old["revoked_at"]:
+        raise ValueError("Token is revoked - create a new one instead")
+    if old["expires_at"]:
+        raise ValueError("Token is already rotated and expiring")
+    grace = max(0, min(int(grace_days), ROTATE_GRACE_MAX))
+    raw = new_api_token(con, old["name"], old["scope"], created_by, rotated_from_id=tid)
+    # grace=0 means cut over immediately: expires_at lands in the past, so the
+    # old secret stops authenticating on the next request.
+    con.execute(
+        "UPDATE api_tokens SET expires_at = datetime('now', ?) WHERE id = ?",
+        (f"{grace} days", tid),
+    )
+    return raw

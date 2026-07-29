@@ -1,3 +1,5 @@
+<img src="brand/scorecard-logo.png" alt="" width="88" align="right">
+
 # Scorecard
 
 A self-hosted company scorecard in the EOS / Dan Martell tradition: one screen that
@@ -39,6 +41,22 @@ both:
   Tokenized URL, no login on the TV, refreshes every 60s, survives token
   rotation, reloads itself daily.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
+- **My Numbers check-in**: each owner gets a focused mobile-friendly page with
+  just their metrics - missing numbers first, one-tap G/Y/R, big inputs, and
+  a fold-out of earlier weeks for catching up on gaps or correcting a number
+  after the fact. Logging in lands there whenever something is due; a nav
+  badge counts what's missing.
+- **Two-way check-ins over Slack, Telegram, WhatsApp/SMS**: owners who haven't
+  entered numbers get a message listing exactly what's missing, with a magic
+  link straight into My Numbers - and they can just reply `1: 12, 2: G` to
+  record values from the chat. Replies are parsed by a strict grammar (no AI),
+  confirmed back with the scored colors, and attributed in the audit trail.
+  Each person picks their channel on the Users page; Microsoft Teams and
+  Google Chat are supported as notify-only channels (webhook post naming the
+  owner, magic link included).
+- **View as user**: admins can see the app exactly as any teammate does (role,
+  nav, My Numbers) behind a loud banner; edits made while viewing-as are
+  audited to the real admin.
 - **Scoring**: green >= 100% of target, yellow 70-99%, red < 70%; lower-is-better
   metrics invert; binary metrics are green/red only; status metrics (client
   health) are set directly as R/Y/G.
@@ -47,11 +65,23 @@ both:
   passwords, forced change on first sign-in.
 - **Slack alerts** behind a master toggle (ships OFF): stale sweep Wed 8am,
   red-escalation sweep Tue 8am, channel post + DM to the metric's owner.
+- **Ask it in Slack**: a remote MCP server at `/mcp` lets Claude read the board
+  conversationally - "what's red this week?", "who hasn't updated?" - and hands
+  back each late DRI's Slack member ID so it can tag them. Read-only; humans
+  still write the numbers, and the scheduled nudges keep running regardless.
 - **Agent API**: bearer-token JSON API returning fully scored state (including
   who is stale and what is red) and accepting metric writes. Ideal for wiring up
   an AI agent or n8n/Zapier flows to feed metrics automatically.
-- **Full audit trail**: every write is recorded; retroactive edits recompute all
-  colors and streaks but never rewrite history.
+- **Demo data mode**: one admin toggle fills the TV board and edit grid with a
+  fictional company - generated relative to the current week and scripted to
+  show off every feature - for screenshots and screen recordings. Real data
+  lives untouched in a separate database throughout; alerts and the API keep
+  using it.
+- **Full audit trail**: every write is recorded (old value, new value, real
+  actor - even during view-as - and channel); retroactive edits recompute all
+  colors and streaks but never rewrite history. Admin > Activity shows the
+  trail, with a LATE chip on anything written after the week's staleness
+  deadline.
 
 ## Quick start (local)
 
@@ -100,9 +130,28 @@ SQLite file. Moving servers = move the volume and the gitignored local files.
 - **Admin > Targets**: baseline + stretch per metric per quarter. Editing a
   target rescores the whole quarter, deliberately: no renegotiating history.
 - **Admin > Users**: add people, change roles, reset passwords, deactivate.
+- **Admin > API tokens**: create, rotate, revoke. Rotate issues a new secret
+  under the same name and scope and leaves the old one working for a grace
+  period (default 7 days), so an integration can be moved over without a
+  window where nothing authenticates. The page shows the old secret's
+  countdown and flags it "still in use" if calls are arriving on it, so you
+  can see when the switch actually landed before revoking.
 - **Admin > Settings**: TV display token (rotate any time), the TV goal band
   (which metric, the long-range goal, milestone ticks), months of history in
-  the edit grid, Slack credentials, and the alerts master switch.
+  the edit grid, Slack credentials, the alerts master switch, and check-in
+  nudges (schedule, public base URL, signing secret; the panel walks through
+  the one-time Slack app setup for two-way replies). A collapsed "More
+  channels" panel holds the optional Teams / Twilio (WhatsApp+SMS) /
+  Google Chat / Telegram config - including one-click Telegram webhook
+  registration; each user's channel is picked on the Users page.
+- **Admin > Setup & status**: the page to open when something should have
+  happened and did not. It reads live state rather than repeating what was
+  typed in: which workspace the Slack token actually belongs to, whether the
+  bot is in the alert channel, whether each stored member ID is a colleague or
+  a Slack Connect stranger from another workspace, whether both switches that
+  have to be on are, and the last run of every scheduled sweep with the reason
+  it sent nothing. Slack is only contacted when you press Re-check; the rest is
+  local and instant, and blocked items raise a count on the nav icon.
 - **TV**: point the TV browser at `/tv` - it redirects to the tokenized
   display URL. The board sizes itself to the panel; no zoom or scrolling.
 
@@ -140,6 +189,37 @@ number is loud and stays on the board, but a row that quietly disappears is
 not, so taking one off the board is deliberately a higher privilege than
 writing to it. API-written cells are attributed to the token in the audit
 trail.
+
+## Brand assets
+
+`brand/scorecard-logo.png` is the master mark (1254px square). Everything the
+browser and Slack see is derived from it and lives in `app/static/`:
+`favicon.ico` (16/32/48), `favicon-16.png`, `favicon-32.png`,
+`apple-touch-icon.png` (180), `icon-192.png`, `icon-512.png`, and
+`icon-maskable-512.png` (mark inset to survive Android's circle crop), wired up
+by `app/templates/_head_icons.html` plus `app/static/site.webmanifest` so
+`/checkin` installs to a phone home screen as "Scorecard". Regenerate after
+editing the master:
+
+```bash
+magick brand/scorecard-logo.png -resize 512x512 -strip -colors 64 app/static/icon-512.png
+# ...same for 192, 180 (apple-touch-icon), 32, 16; ico is 48/32/16 in one file
+```
+
+Slack has no API for an app's icon, so that one is manual and one-time: upload
+`app/static/icon-512.png` at api.slack.com/apps > Basic Information > Display
+Information. Admin > Settings links the file directly for exactly this.
+
+What the app *can* set itself is the avatar on each message it sends: with the
+`chat:write.customize` scope granted, every DM and channel alert goes out with
+`icon_url` pointing at `<public base URL>/static/icon-512.png` (Slack fetches
+it, so the public base URL has to be set - the same one the check-in links
+need). Without the scope the send comes back `missing_scope`, so
+`alerts._post_message` retries once without the icon: the picture is optional,
+the nudge is not. Admin > Setup & status says which of the two you have after a
+Re-check. Incoming webhooks are left alone - they post as the app and ignore
+`icon_url` unless they are a legacy custom integration. Pasted scorecard links
+carry the mark too, via the Open Graph tags in `_head_icons.html`.
 
 ## Working on this repo with an AI assistant
 

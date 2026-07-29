@@ -39,12 +39,20 @@ def _read_token(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     return api_token_from_request(request, con, need_write=False)
 
 
-@router.get("/scorecard")
-def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep)):
-    api_token_from_request(request, con, need_write=False)
-    now = datetime.now(timezone.utc)
+def _slack_ids(con: sqlite3.Connection) -> dict[int, Optional[str]]:
+    """user_id -> Slack member id, for the stale/red lists. Lets a caller that
+    can post to Slack (the MCP server, an automation) address the DRI directly
+    instead of guessing at a display name."""
+    return {r["id"]: r["slack_member_id"]
+            for r in con.execute("SELECT id, slack_member_id FROM users").fetchall()}
+
+
+def build_scorecard(con: sqlite3.Connection, now: datetime) -> dict:
+    """Full scored state. Shared by GET /api/v1/scorecard and the MCP server so
+    both answer from the same engine the TV and the edit grid use."""
     vm = gridm.build_grid(con, now)
     week = wk.last_closed_week(now)
+    slack = _slack_ids(con)
     out = {
         "current_week": vm.current_week.isoformat(),
         "current_week_label": vm.quarter_label,
@@ -52,6 +60,7 @@ def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep))
         "entries_due_by": wk.entry_deadline(week).isoformat(),
         "stale_after": wk.stale_at(week).isoformat(),
         "sections": [],
+        "pending": [],
         "stale": [],
         "red": [],
     }
@@ -81,20 +90,32 @@ def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep))
                 "trend": [sp["state"] for sp in r.spark],
             }
             sec["metrics"].append(m)
+            # Missing numbers split by whether the deadline has passed. Chasing
+            # is only useful while "pending" is still true - once a metric is
+            # stale the week is already late, so a list of stale rows answers
+            # "who was late" rather than "who should I nudge now".
+            if closed_cell and closed_cell.state.value == "pending":
+                out["pending"].append({"id": r.metric_id, "name": r.name, "dri": r.dri_name,
+                                       "dri_slack_member_id": slack.get(r.dri_user_id)})
             if closed_cell and closed_cell.state.value == "stale":
-                out["stale"].append({"id": r.metric_id, "name": r.name, "dri": r.dri_name})
+                out["stale"].append({"id": r.metric_id, "name": r.name, "dri": r.dri_name,
+                                     "dri_slack_member_id": slack.get(r.dri_user_id)})
             if r.red_streak >= 1:
                 out["red"].append({"id": r.metric_id, "name": r.name, "dri": r.dri_name,
+                                   "dri_slack_member_id": slack.get(r.dri_user_id),
                                    "weeks_red": r.red_streak,
                                    "one_three_one_filed": r.has_131})
         out["sections"].append(sec)
     return out
 
 
-@router.get("/metrics")
-def list_metrics(request: Request, include_archived: bool = False,
-                 con: sqlite3.Connection = Depends(db_dep)):
+@router.get("/scorecard")
+def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
+    return build_scorecard(con, datetime.now(timezone.utc))
+
+
+def metrics_rows(con: sqlite3.Connection, include_archived: bool = False) -> list[dict]:
     arch = "" if include_archived else "WHERE m.archived_at IS NULL"
     rows = con.execute(
         f"""SELECT m.id, m.name, m.metric_type, m.unit, m.archived_at,
@@ -104,6 +125,13 @@ def list_metrics(request: Request, include_archived: bool = False,
             {arch} ORDER BY s.sort_order, m.sort_order"""
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/metrics")
+def list_metrics(request: Request, include_archived: bool = False,
+                 con: sqlite3.Connection = Depends(db_dep)):
+    api_token_from_request(request, con, need_write=False)
+    return metrics_rows(con, include_archived)
 
 
 class EntryIn(BaseModel):

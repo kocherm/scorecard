@@ -1,0 +1,19 @@
+{# Product mark: the tab icon, home-screen icon and Slack app icon are all the
+   same Scorecard gauge (brand/scorecard-logo.png is the master). The Aprendio
+   logo stays on the sidenav and in the About dialog - that is the company, this
+   is the product. Included by every page that owns a <head>: base, display, login. #}
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="manifest" href="/static/site.webmanifest">
+<meta name="theme-color" content="#1B2A4A">
+{# Link previews (Slack, Teams, Google Chat, Telegram, iMessage) read og:image,
+   so a pasted scorecard link carries the mark too. Absolute URL because the
+   unfurler fetches it, not the browser. Nothing here names the company: an
+   unfurl is the one surface that renders for whoever the link was forwarded to. #}
+<meta property="og:type" content="website">
+<meta property="og:title" content="Scorecard">
+<meta property="og:description" content="The weekly company scorecard.">
+<meta property="og:image" content="{{ request.base_url }}static/icon-512.png">
+<meta name="twitter:card" content="summary">

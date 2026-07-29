@@ -82,3 +82,34 @@ def test_stale_across_dst_fall_back():
     st = wk.stale_at(week, TZ)
     assert st.hour == 8 and st.date() == date(2026, 11, 4)
     assert st.utcoffset().total_seconds() == -6 * 3600  # CST after fall back
+
+
+def local(h, m=0):  # a Chicago-local instant on an arbitrary date
+    return datetime(2026, 7, 22, h, m, tzinfo=TZ)
+
+
+def test_nightly_window_crossing_midnight():
+    for hour, inside in [(20, False), (21, True), (23, True),
+                         (0, True), (5, True), (6, False), (12, False)]:
+        assert wk.in_nightly_window(local(hour), "21:00", "06:00", TZ) == inside
+    # boundaries: start inclusive, end exclusive
+    assert wk.in_nightly_window(local(5, 59), "21:00", "06:00", TZ)
+    assert not wk.in_nightly_window(local(20, 59), "21:00", "06:00", TZ)
+
+
+def test_nightly_window_same_day():
+    assert wk.in_nightly_window(local(13), "09:00", "17:00", TZ)
+    assert not wk.in_nightly_window(local(8), "09:00", "17:00", TZ)
+    assert not wk.in_nightly_window(local(17), "09:00", "17:00", TZ)
+
+
+def test_nightly_window_judged_in_business_tz():
+    # 03:00 UTC on Jul 23 = 22:00 CDT Jul 22 -> inside a 21:00-06:00 window.
+    utc = datetime(2026, 7, 23, 3, 0, tzinfo=ZoneInfo("UTC"))
+    assert wk.in_nightly_window(utc, "21:00", "06:00", TZ)
+
+
+def test_nightly_window_degenerate_and_garbage():
+    assert not wk.in_nightly_window(local(12), "12:00", "12:00", TZ)  # zero-length
+    assert not wk.in_nightly_window(local(12), "", "06:00", TZ)
+    assert not wk.in_nightly_window(local(12), "9pm", "6am", TZ)

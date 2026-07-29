@@ -7,28 +7,85 @@
   <p class="page-sub">Bearer tokens for Hermes, n8n, and other integrations. <span class="mono">GET /api/v1/scorecard</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/entries</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/archive</span> (admin scope only)</p>
 </div>
 {% if new_token %}
-<div class="flash ok">Token <strong>{{ new_name }}</strong> created: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.</div>
+<div class="flash ok">Token <strong>{{ new_name }}</strong> {{ new_label }}: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.{% if new_label == 'rotated' %} Paste it into the integration; the old secret keeps working until it expires, and this page flags it if anything is still calling with it.{% endif %}
+  <div class="mcp-url">Claude connector URL for this token:<br><span class="mono">{{ mcp_url }}</span></div>
+</div>
+{% endif %}
+{% if error %}
+<div class="flash err">{{ error }}</div>
 {% endif %}
 <div class="panel">
   <table class="list">
     <tr><th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr>
-    {% for t in tokens %}
+    {% for g in lineages %}
+    {% set h = g.head %}
     <tr>
-      <td>{{ t['name'] }}</td>
-      <td>{{ t['scope'] }}</td>
-      <td class="note">{{ t['created_at'][:10] }}</td>
-      <td class="note">{{ t['last_used_at'][:16] if t['last_used_at'] else 'never' }}</td>
-      <td><span class="chip {{ 'off' if t['revoked_at'] else 'on' }}">{{ 'revoked' if t['revoked_at'] else 'active' }}</span></td>
+      <td>{{ h.t['name'] }}</td>
+      <td>{{ h.t['scope'] }}</td>
+      <td class="note">{{ h.t['created_at'][:10] }}</td>
+      <td class="note">{{ h.t['last_used_at'][:16] if h.t['last_used_at'] else 'never' }}</td>
+      <td><span class="chip {{ h.chip }}">{{ h.status }}</span></td>
+      <td class="token-actions">
+        {% if h.live %}
+        <form method="post" action="/admin/tokens/{{ h.t['id'] }}/rotate">
+          <input type="number" name="grace_days" value="{{ grace_default }}" min="0" max="{{ grace_max }}" class="grace-days" title="Days the current secret keeps working (0 = cut over now)">
+          <span class="note">d grace</span>
+          <button class="btn sm" onclick="return confirm('Rotate {{ h.t['name'] }}? The current secret keeps working for the grace period.')">Rotate</button>
+        </form>
+        <form method="post" action="/admin/tokens/{{ h.t['id'] }}/revoke">
+          <button class="btn danger sm" onclick="return confirm('Revoke {{ h.t['name'] }}? Anything using it stops working immediately.')">Revoke</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% for p in g.prior %}
+    <tr class="token-prior">
+      <td class="note">&#8627; previous secret</td>
+      <td class="note">{{ p.t['scope'] }}</td>
+      <td class="note">{{ p.t['created_at'][:10] }}</td>
+      <td class="note">{{ p.t['last_used_at'][:16] if p.t['last_used_at'] else 'never' }}</td>
       <td>
-        {% if not t['revoked_at'] %}
-        <form method="post" action="/admin/tokens/{{ t['id'] }}/revoke">
-          <button class="btn danger sm" onclick="return confirm('Revoke {{ t['name'] }}?')">Revoke</button>
+        <span class="chip {{ p.chip }}">{{ p.status }}</span>
+        {% if p.still_in_use %}<span class="chip warn-late">still in use</span>{% endif %}
+      </td>
+      <td class="token-actions">
+        {% if p.live %}
+        <form method="post" action="/admin/tokens/{{ p.t['id'] }}/revoke">
+          <button class="btn danger sm" onclick="return confirm('Revoke the previous {{ p.t['name'] }} secret now?')">Revoke now</button>
         </form>
         {% endif %}
       </td>
     </tr>
     {% endfor %}
+    {% if g.retired %}
+    <tr class="token-prior">
+      <td class="note" colspan="6">&#8627; {{ g.retired }} earlier secret{{ 's' if g.retired != 1 }} retired</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
   </table>
+  <h3>Claude connector (MCP)</h3>
+  <p class="note">Claude reads the board through a read-only MCP server at
+    <span class="mono">{{ mcp_base }}/mcp</span> - three tools:
+    <span class="mono">get_scorecard</span>,
+    <span class="mono">get_check_in_status</span> (who still owes a number,
+    split into not-yet-late and late, each with the DRI's Slack member ID so
+    Claude can tag them) and <span class="mono">list_metrics</span>. No writes:
+    numbers stay something a person reports, so the audit trail keeps naming
+    the person.</p>
+  <p class="note">To connect it, create a <strong>read only</strong> token
+    below - the page then shows a ready-to-paste connector URL of the form
+    <span class="mono">{{ mcp_base }}/mcp/t/&lt;token&gt;</span>. Tokens are
+    stored hashed, so that URL can only be shown the once; rotate the token to
+    get a fresh one. In Claude: Settings &rsaquo; Customize &rsaquo; Connectors
+    &rsaquo; Add &rsaquo; Add custom connector, paste the URL, leave the OAuth
+    fields empty. Opening the URL in a browser returns
+    <span class="mono">405</span> - it is a POST-only JSON-RPC endpoint, not a
+    page, and that response means it is working. The token's
+    <strong>Last used</strong> below is how you confirm Claude connected.</p>
+  <p class="note">The URL carries the token, so it lands in the reverse proxy's
+    access log. Keep it read-scoped, and rotate if the URL leaks.</p>
+
   <h3>New token</h3>
   <form method="post" action="/admin/tokens" style="display:flex; gap:10px; align-items:end">
     <div><label>Name</label><input type="text" name="name" placeholder="hermes" required></div>

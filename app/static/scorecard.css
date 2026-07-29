@@ -277,8 +277,139 @@ table.list tr:last-child td { border-bottom: none; }
 .chip.editor { background: rgba(49,130,206,0.1); color: #2b6cb0; }
 .chip.viewer { background: var(--pearl); color: var(--slate); }
 .chip.off { background: var(--pearl); color: var(--silver); }
+.chip.warn-late { background: var(--amber-subtle); color: var(--amber-deep); font-weight: 700; }
+.chip.pending { background: var(--amber-subtle); color: var(--amber-deep); }
 .chip.on { background: var(--green-subtle); color: var(--green-deep); }
+.chip.warn { background: var(--amber-subtle); color: var(--amber-deep); }
+.chip.blocked { background: var(--red-subtle); color: var(--red-deep); }
 
+/* ---- "Saved." on the panel you were actually working in ---- */
+.saved-flash { animation: saved-fade 6s ease-in forwards; }
+@keyframes saved-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+/* Anchored panels sit under nothing fixed, but leave the heading breathing
+   room so a jumped-to panel does not start hard against the viewport edge. */
+.panel[id] { scroll-margin-top: 16px; }
+
+/* ---- "use the detected value" next to a URL field ---- */
+.url-fill { display: flex; gap: 8px; align-items: center; }
+.url-fill input { flex: 1; }
+.url-fill .btn { white-space: nowrap; }
+
+/* ---- MCP connector URL, shown once beside a fresh token ---- */
+.mcp-url { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cloud);
+  font-size: 12.5px; line-height: 1.7; }
+.mcp-url .mono { word-break: break-all; }
+
+/* ---- API token rotation (grace window rows) ---- */
+.token-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+.token-actions form { display: flex; gap: 6px; align-items: center; margin: 0; }
+input[type=number].grace-days { width: 56px; padding: 5px 8px; font-size: 12px; }
+tr.token-prior td { background: var(--pearl); padding-top: 6px; padding-bottom: 6px; }
+tr.token-prior td:first-child { padding-left: 24px; }
+
+/* ---- setup & status rows ---- */
+.status-list { list-style: none; margin: 0; padding: 0; }
+.status-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--pearl);
+}
+.status-row:last-child { border-bottom: none; }
+/* The chip is the column you scan, so it keeps its width whatever it says. */
+.status-row > .chip { flex: none; width: 76px; text-align: center; margin-top: 1px; }
+.status-body { flex: 1; min-width: 0; }
+.status-label { font-size: 14px; font-weight: 500; color: var(--ink); }
+.status-detail { font-size: 12.5px; color: var(--slate); margin-top: 2px; line-height: 1.5; }
+.status-fix { flex: none; display: flex; gap: 8px; align-items: center; }
+.status-fix form { margin: 0; }
+.status-sub { list-style: none; margin: 8px 0 0; padding: 0; }
+.status-sub li {
+  font-size: 12.5px; color: var(--ink-light); padding: 3px 0;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.status-sub .dot { width: 8px; height: 8px; border-radius: 999px; flex: none; background: var(--cloud); }
+.status-sub .dot.ok { background: var(--green); }
+.status-sub .dot.warn { background: var(--amber); }
+.status-sub .dot.blocked { background: var(--red); }
+/* Blocked setup reads red, not the accent orange of "you owe numbers" - one is
+   a broken instance, the other is a normal Monday. */
+.nav-badge.alert { background: var(--red); }
+
+/* ---- collapsed settings sections (progressive disclosure) ---- */
+.panel details { border-top: 1px solid var(--cloud); padding: 10px 0 4px; }
+.panel details:last-of-type { border-bottom: 1px solid var(--cloud); margin-bottom: 4px; }
+.panel details summary {
+  cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ink-light);
+  list-style-position: inside; padding: 2px 0;
+}
+.panel details summary:hover { color: var(--accent-hover); }
+.panel details[open] { padding-bottom: 12px; }
+
+/* ---- my numbers check-in ---- */
+.sidenav nav a { position: relative; }
+.nav-badge {
+  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 999px; background: var(--accent);
+  color: #fff; font-size: 10px; font-weight: 700; line-height: 16px;
+  text-align: center;
+}
+.ck-list { display: grid; gap: 14px; max-width: 560px; }
+.ck-card {
+  background: #fff; border: 1px solid var(--cloud);
+  border-radius: var(--radius-lg, 12px); padding: 16px 18px;
+}
+.ck-card.ck-due-missing { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-subtle); }
+.ck-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.ck-section { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--silver); }
+.ck-name { font-size: 16px; font-weight: 600; color: var(--ink); margin-top: 2px; }
+.ck-chip {
+  flex-shrink: 0; padding: 3px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+}
+.ck-chip.green { background: var(--green-subtle); color: var(--green-deep); }
+.ck-chip.yellow { background: var(--amber-subtle); color: var(--amber-deep); }
+.ck-chip.red { background: var(--red-subtle); color: var(--red-deep); }
+.ck-chip.stale, .ck-chip.pending, .ck-chip.no-target { background: var(--pearl); color: var(--slate); }
+.ck-week { padding: 8px 0 2px; }
+.ck-week + .ck-week { border-top: 1px dashed var(--cloud); margin-top: 8px; }
+.ck-week label { display: block; font-size: 12px; color: var(--slate); margin-bottom: 6px; }
+.ck-week.missing label { color: var(--amber-deep); }
+.ck-current label { color: var(--silver); }
+.ck-form { display: flex; gap: 8px; align-items: center; }
+.ck-form input[type="number"] {
+  width: 130px; font-size: 17px; padding: 9px 12px;
+  border: 1px solid var(--mist); border-radius: var(--radius-md);
+}
+.ck-status {
+  min-width: 52px; padding: 9px 0; border-radius: var(--radius-md);
+  border: 1.5px solid var(--mist); background: #fff; color: var(--slate);
+  font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.ck-status.g.sel { background: var(--green); border-color: var(--green); color: #fff; }
+.ck-status.y.sel { background: var(--amber); border-color: var(--amber); color: #fff; }
+.ck-status.r.sel { background: var(--red); border-color: var(--red); color: #fff; }
+.ck-status:hover { border-color: var(--slate); }
+.ck-card details.ck-earlier { border-top: 1px dashed var(--cloud); margin-top: 8px; padding-top: 6px; }
+.ck-card details.ck-earlier summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--slate); padding: 2px 0;
+}
+.ck-card details.ck-earlier summary strong { color: var(--amber-deep); }
+.ck-card details.ck-earlier summary:hover { color: var(--accent-hover); }
+.ck-card details.ck-earlier[open] summary { margin-bottom: 4px; }
+@media (max-width: 600px) {
+  .ck-list { max-width: none; }
+  .ck-form input[type="number"] { width: 100%; }
+  .ck-status { flex: 1; }
+}
+
+.viewas-bar {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  margin: -8px 0 16px; padding: 10px 14px;
+  background: var(--amber-subtle); color: var(--amber-deep);
+  border: 1px solid var(--amber); border-radius: var(--radius-md);
+  font-size: 13px;
+}
+.viewas-bar .btn { flex-shrink: 0; }
 .flash { padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: 16px; }
 .flash.ok { background: var(--green-subtle); color: var(--green-deep); }
 .flash.err { background: var(--red-subtle); color: var(--red-deep); }
@@ -326,6 +457,23 @@ body.tvboard {
 body.tvboard .fab { opacity: 0.12; width: 34px; height: 34px; right: 10px; bottom: 10px; }
 body.tvboard .fab svg { width: 15px; height: 15px; }
 body.tvboard .fab:hover, body.tvboard .fab:focus-visible { opacity: 1; }
+
+/* Night screensaver: keyword black = "panel off", deliberately not a brand
+   color. Sits above the board and fab (50) but below conn-lost (60) so a
+   dead network is still flagged overnight. */
+.tv-sleep { position: fixed; inset: 0; z-index: 55; background: black; }
+/* The field, not the screen, is what the clock drifts across - the inset keeps
+   it clear of the bezel and of TV overscan. */
+.tv-sleep-field { position: absolute; inset: 7vh 4vw; }
+.tv-sleep-clock {
+  position: absolute; color: var(--slate); opacity: 0.55;
+  font-size: 7vw; font-weight: 500; font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em; white-space: nowrap; line-height: 1;
+  /* Offsetting by its own size means --x/--y can run the full 0-100% without
+     the clock ever hanging off an edge, whatever the font size is. */
+  left: var(--x); top: var(--y);
+  transform: translate(calc(-1 * var(--x)), calc(-1 * var(--y)));
+}
 
 .board { height: 100vh; display: flex; flex-direction: column; gap: 1.4vh; padding: 2vh 2.2vw; }
 

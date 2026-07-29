@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Setup &amp; status{% endblock %}
+{% block content %}
+{% set blocked = (checks + network) | selectattr('state', 'equalto', 'blocked') | list %}
+<div class="page-head">
+  <div class="eyebrow">Admin</div>
+  <h1>Setup &amp; status</h1>
+  <p class="page-sub">Read from live state, not from what was typed in. <strong>Blocked</strong> means something switched on here cannot actually work; <strong>warn</strong> means it works but part of it is unused.</p>
+</div>
+{% if matched %}<div class="flash ok saved-flash">Updated {{ matched }} Slack member ID{{ 's' if matched != '1' }}.</div>{% endif %}
+{% if blocked %}
+<div class="flash err">{{ blocked|length }} thing{{ 's' if blocked|length != 1 }} blocking: {% for b in blocked %}{{ b.label }}{{ '; ' if not loop.last }}{% endfor %}.</div>
+{% endif %}
+{% if proposal is not none %}
+<div class="panel" id="match">
+  <h2>Match Slack IDs from email</h2>
+  {% if proposal_error %}
+  <div class="flash err">{{ proposal_error }}</div>
+  {% else %}
+  <p class="note">Joined on email address &mdash; the one field both sides agree on. Nothing is written until you apply it: an ID that was never checked is exactly the failure this page exists for.</p>
+  <form method="post" action="/admin/status/match-ids/apply">
+    <table class="list">
+      <tr><th></th><th>Person</th><th>Email</th><th>Slack account</th><th>Member ID</th><th>Now</th></tr>
+      {% for p in proposal %}
+      <tr>
+        <td>{% if p.proposed and p.state != 'match' %}<input type="checkbox" name="pair" value="{{ p.user_id }}:{{ p.proposed }}" checked>{% endif %}</td>
+        <td>{{ p.name }}</td>
+        <td class="note">{{ p.email }}</td>
+        <td>{{ p.slack_name or '&mdash;'|safe }}</td>
+        <td class="mono">{{ p.proposed or '&mdash;'|safe }}</td>
+        <td class="note">{{ p.note }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div style="margin-top:14px; display:flex; gap:10px">
+      <button class="btn" type="submit">Apply checked</button>
+      <a class="btn secondary" href="/admin/status">Cancel</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+<div class="panel" id="config">
+  <h2>Configuration</h2>
+  <p class="note">In dependency order, so an incomplete instance reads as a setup list. Every row comes from the same helpers the sweeps and the board use.</p>
+  <ul class="status-list">
+    {% for c in checks %}
+    <li class="status-row">
+      <span class="chip {{ c.chip }}">{{ c.badge }}</span>
+      <div class="status-body">
+        <div class="status-label">{{ c.label }}</div>
+        <div class="status-detail">{{ c.detail }}</div>
+        {% if c.items %}
+        <ul class="status-sub">
+          {% for i in c.items %}
+          <li><span class="dot {{ i.state }}"></span>{{ i.name }} <span class="note">{{ i.detail }}</span></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="status-fix">
+        {% if c.fix_url %}<a class="btn secondary sm" href="{{ c.fix_url }}">{{ c.fix_label }}</a>{% endif %}
+        {% for a in c.actions %}
+        <form method="post" action="{{ a.post }}"><button class="btn secondary sm" type="submit">{{ a.label }}</button></form>
+        {% endfor %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+<div class="panel" id="verify">
+  <div style="display:flex; align-items:center; gap:12px">
+    <h2 style="margin:0">Slack verification</h2>
+    <form method="post" action="/admin/status/recheck" style="margin-left:auto">
+      <button class="btn sm" type="submit">Re-check now</button>
+    </form>
+  </div>
+  <p class="note" style="margin-top:10px">These ask Slack, so they run only when you press the button &mdash; never on page load, or every admin page would wait on Slack and burn its rate limit. Each answer says how old it is.</p>
+  <ul class="status-list">
+    {% for c in network %}
+    <li class="status-row">
+      <span class="chip {{ c.chip }}">{{ c.badge }}</span>
+      <div class="status-body">
+        <div class="status-label">{{ c.label }}</div>
+        <div class="status-detail">{{ c.detail }}</div>
+        {% if c.items %}
+        <ul class="status-sub">
+          {% for i in c.items %}
+          <li><span class="dot {{ i.state }}"></span>{{ i.name }} <span class="note">{{ i.detail }}</span></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+<div class="panel" id="sweeps">
+  <h2>Scheduled sweeps</h2>
+  <p class="note">The last run of each, including the runs that sent nothing and why. A sweep that stops early is otherwise indistinguishable from one that never fired.</p>
+  <table class="list">
+    <tr><th>Sweep</th><th>Last run</th><th>Result</th><th>Sent</th></tr>
+    {% for s in sweeps %}
+    <tr>
+      <td>{{ s.label }}</td>
+      <td class="note">{{ s.when }}</td>
+      <td><span class="chip {{ s.chip }}">{{ s.outcome }}</span> <span class="note">{{ s.detail }}</span></td>
+      <td class="note">{{ s.sent or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

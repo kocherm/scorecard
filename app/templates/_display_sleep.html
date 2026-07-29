@@ -1,0 +1,10 @@
+{# Night screensaver: full-screen blackout with a dim clock that drifts to a
+   new spot each refresh so nothing burns into the panel. Server-side decision;
+   the normal 10s htmx poll swaps the board back in when the window ends.
+   --x/--y drive both the position and the clock's own offset, so however big
+   the font gets the clock still can't hang off an edge. #}
+<div class="tv-sleep">
+  <div class="tv-sleep-field">
+    <div class="tv-sleep-clock" style="--x:{{ sleep.left }}%; --y:{{ sleep.top }}%">{{ sleep.rendered_at }}</div>
+  </div>
+</div>

@@ -121,3 +121,18 @@ def stale_at(week: date, tz: ZoneInfo = BUSINESS_TZ) -> datetime:
 def last_closed_week(now: datetime, tz: ZoneInfo = BUSINESS_TZ) -> date:
     """The most recent fully-elapsed week (the one whose entries are due)."""
     return current_week(now, tz) - timedelta(days=7)
+
+
+def in_nightly_window(now: datetime, start: str, end: str,
+                      tz: ZoneInfo = BUSINESS_TZ) -> bool:
+    """True when business-local wall-clock time is inside [start, end), both
+    "HH:MM" strings. The window may cross midnight ("21:00"-"06:00").
+    start == end, or anything unparseable, means the window never matches."""
+    try:
+        s, e = time.fromisoformat(start), time.fromisoformat(end)
+    except (TypeError, ValueError):
+        return False
+    if s == e:
+        return False
+    t = now.astimezone(tz).time()
+    return (s <= t < e) if s < e else (t >= s or t < e)
