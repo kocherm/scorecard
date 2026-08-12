@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS users (
     webauthn_handle TEXT,
     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_webauthn_handle
-    ON users(webauthn_handle) WHERE webauthn_handle IS NOT NULL;
+-- The unique index on webauthn_handle is created by migrate/passkeys.py, NOT
+-- here. This file runs against existing databases too, where CREATE TABLE IF
+-- NOT EXISTS is a no-op and so users has no webauthn_handle column yet - an
+-- index over it here fails the whole script, and init_db runs before any
+-- migration, so the app would not start at all. The migration owns the column
+-- and the index together, and runs unconditionally from lifespan.
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash   TEXT PRIMARY KEY,
