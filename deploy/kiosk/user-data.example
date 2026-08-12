@@ -1,0 +1,258 @@
+#cloud-config
+#
+# Scorecard kiosk - cloud-init provisioning.
+#
+# Copy to the FAT boot partition as: user-data  (no file extension)
+#
+# This single file defines the whole appliance: the browser service, the Wi-Fi
+# self-heal, the watchdog, persistent logging, and the nightly reboot. It is the
+# authoritative build artifact - do not hand-edit units on a running unit and
+# expect them to survive re-provisioning.
+#
+# Placeholders to replace before imaging: KIOSK_USER, the passwd hash, and the
+# SSH public key. Generate a hash with:  openssl passwd -6
+
+hostname: scorecard-kiosk
+manage_etc_hosts: true
+manage_resolv_conf: false
+timezone: Etc/UTC
+
+# cog is WPE WebKit rendering straight to KMS/DRM - no X, no desktop, no
+# compositor. curl backs the service's wait-for-server probe.
+packages:
+  - cog
+  - curl
+  - avahi-daemon
+
+apt:
+  preserve_sources_list: true
+
+keyboard:
+  model: pc105
+  layout: "us"
+
+user:
+  name: KIOSK_USER
+  shell: /bin/bash
+  lock_passwd: false
+  passwd: "REPLACE_WITH_OPENSSL_PASSWD_6_HASH"
+  ssh_authorized_keys:
+    - "ssh-ed25519 REPLACE_WITH_YOUR_SUPPORT_PUBLIC_KEY"
+ssh_pwauth: false
+
+write_files:
+  # ------------------------------------------------------------------ kiosk
+  - path: /etc/systemd/system/scorecard-kiosk.service
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Scorecard TV kiosk (cog/WPE on DRM)
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=KIOSK_USER
+      Group=KIOSK_USER
+      # DRM/KMS output, GPU access, and input all need supplementary groups;
+      # without them cog starts and then fails to acquire the display.
+      SupplementaryGroups=video render input
+      RuntimeDirectory=scorecard-kiosk
+      Environment=XDG_RUNTIME_DIR=/run/scorecard-kiosk
+      # The board URL is customer-set on the boot partition, not baked in.
+      EnvironmentFile=/boot/firmware/scorecard-kiosk.conf
+      # Wait for the server before painting, so a slow network shows the console
+      # rather than a browser error page the customer would have to interpret.
+      ExecStartPre=/bin/sh -c 'until curl -sf -o /dev/null "${KIOSK_URL}"; do sleep 2; done'
+      # renderer=gles is REQUIRED on vc4 - the default modeset renderer never
+      # flips frames and the screen stays black.
+      ExecStart=/bin/sh -c 'exec /usr/bin/cog -P drm -O renderer=gles "${KIOSK_URL}"'
+      Restart=always
+      RestartSec=3
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # -------------------------------------------------------------- self-heal
+  - path: /usr/local/sbin/wifi-selfheal.sh
+    owner: "root:root"
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Rebuild the Wi-Fi profile if NetworkManager has lost it.
+      #
+      # An unclean power loss can zero out NM's connection files. The unit then
+      # boots perfectly, joins nothing, and reports 127.0.0.1 - and because it is
+      # headless and remote access needs the network, recovery otherwise means
+      # physically extracting the SD card. Credentials are kept on the FAT boot
+      # partition, which is written to almost never, and restored from there.
+      set -eu
+
+      CRED=/boot/firmware/wifi-credentials
+      [ -r "$CRED" ] || { echo "wifi-selfheal: no $CRED, nothing to do"; exit 0; }
+      . "$CRED"
+      [ -n "${WIFI_SSID:-}" ] && [ -n "${WIFI_PSK:-}" ] || {
+        echo "wifi-selfheal: credentials file incomplete"; exit 0; }
+
+      # Wait for NetworkManager to accept commands.
+      i=0
+      while [ "$i" -lt 30 ]; do
+        nmcli -t general status >/dev/null 2>&1 && break
+        i=$((i + 1)); sleep 1
+      done
+
+      # If any Wi-Fi profile at all exists, leave well enough alone. This is
+      # deliberately coarse: it repairs total loss, it does not second-guess a
+      # profile an installer added on purpose.
+      if nmcli -t -f TYPE connection show 2>/dev/null | grep -q '^802-11-wireless$'; then
+        echo "wifi-selfheal: a Wi-Fi profile exists, nothing to do"
+        exit 0
+      fi
+
+      echo "wifi-selfheal: no Wi-Fi profile found - recreating '$WIFI_SSID'"
+      nmcli connection add type wifi con-name "$WIFI_SSID" ifname wlan0 \
+        ssid "$WIFI_SSID" \
+        wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$WIFI_PSK" \
+        connection.autoconnect yes
+      nmcli connection up "$WIFI_SSID" || true
+      echo "wifi-selfheal: done"
+
+  - path: /etc/systemd/system/wifi-selfheal.service
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Rebuild the kiosk Wi-Fi profile if it has been lost
+      Wants=NetworkManager.service
+      After=NetworkManager.service
+      Before=NetworkManager-wait-online.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/wifi-selfheal.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # --------------------------------------------------------------- watchdog
+  - path: /usr/local/sbin/kiosk-watchdog.sh
+    owner: "root:root"
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Runs every 5 minutes. Covers the two ways a unit goes dark without
+      # anything crashing loudly enough for systemd to notice.
+      set -u
+      STATE=/run/kiosk-watchdog.misses
+
+      # 1. Cut off from the network. A unit with no default route cannot be
+      #    reached to be repaired, so retry the self-heal now rather than
+      #    waiting for the nightly reboot.
+      if ! ip route show default | grep -q .; then
+        logger -t kiosk-watchdog "no default route - running wifi-selfheal"
+        /usr/local/sbin/wifi-selfheal.sh || true
+      fi
+
+      # 2. Dead renderer. cog can outlive its web process, leaving a frozen or
+      #    black screen while the service still reads as active. Two consecutive
+      #    misses before acting, so a restart in flight is not mistaken for a hang.
+      if pgrep -x WPEWebProcess >/dev/null 2>&1; then
+        rm -f "$STATE"
+        exit 0
+      fi
+      misses=$(cat "$STATE" 2>/dev/null || echo 0)
+      misses=$((misses + 1))
+      echo "$misses" > "$STATE"
+      [ "$misses" -lt 2 ] && exit 0
+      logger -t kiosk-watchdog "WPEWebProcess missing twice - restarting kiosk"
+      rm -f "$STATE"
+      systemctl restart scorecard-kiosk.service
+
+  - path: /etc/systemd/system/kiosk-watchdog.service
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Scorecard kiosk watchdog
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/kiosk-watchdog.sh
+
+  - path: /etc/systemd/system/kiosk-watchdog.timer
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Run the Scorecard kiosk watchdog every 5 minutes
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=5min
+
+      [Install]
+      WantedBy=timers.target
+
+  # --------------------------------------------------------- nightly reboot
+  - path: /etc/systemd/system/kiosk-reboot.service
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nightly reboot of the Scorecard kiosk
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/sbin/shutdown -r now
+
+  - path: /etc/systemd/system/kiosk-reboot.timer
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Reboot the Scorecard kiosk nightly
+
+      [Timer]
+      # Local time. Pick an hour no one is watching the screen.
+      OnCalendar=*-*-* 04:30:00
+      Persistent=false
+
+      [Install]
+      WantedBy=timers.target
+
+  # ---------------------------------------------------------------- logging
+  - path: /etc/systemd/journald.conf.d/99-persistent.conf
+    owner: "root:root"
+    permissions: "0644"
+    content: |
+      # Raspberry Pi OS ships /usr/lib/systemd/journald.conf.d/
+      # 40-rpi-volatile-storage.conf with Storage=volatile, so by default a unit
+      # discards every log at reboot - and a boot-time fault is exactly what you
+      # need the logs for. The 99- prefix sorts last so this wins.
+      #
+      # NOTE: this is defeated by overlayfs (writes land in RAM). See
+      # "Read-only root" in README.md - you get durable logs or an unkillable
+      # filesystem, not both, without putting logs elsewhere.
+      [Journal]
+      Storage=persistent
+      SystemMaxUse=200M
+
+runcmd:
+  # No desktop: this is an appliance, and lightdm would only fight cog for DRM.
+  - [ systemctl, set-default, multi-user.target ]
+  - [ sh, -c, "systemctl disable lightdm.service 2>/dev/null || true" ]
+  # Persistent logging needs the directory AND a flush, or journald keeps
+  # writing to /run until the next boot.
+  - [ mkdir, -p, /var/log/journal ]
+  - [ systemd-tmpfiles, --create, --prefix, /var/log/journal ]
+  - [ systemctl, restart, systemd-journald ]
+  - [ journalctl, --flush ]
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, --now, ssh ]
+  - [ systemctl, enable, wifi-selfheal.service ]
+  - [ systemctl, enable, --now, kiosk-watchdog.timer ]
+  - [ systemctl, enable, --now, kiosk-reboot.timer ]
+  - [ systemctl, enable, scorecard-kiosk.service ]
+  - [ systemctl, start, wifi-selfheal.service ]
+  - [ systemctl, start, scorecard-kiosk.service ]

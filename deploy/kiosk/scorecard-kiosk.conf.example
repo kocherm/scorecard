@@ -1,0 +1,12 @@
+# Scorecard kiosk - which board this unit displays.
+#
+# Copy to the FAT boot partition as: scorecard-kiosk.conf
+# (on a running unit that is /boot/firmware/scorecard-kiosk.conf)
+#
+# This is read by scorecard-kiosk.service as an EnvironmentFile, so a customer
+# can repoint the unit by editing one line on any laptop with an SD reader -
+# no SSH, no keyboard, no HDMI.
+
+# The /tv shortcut resolves the display token server-side, so the device never
+# stores a credential and the URL keeps working after a token rotation.
+KIOSK_URL=https://scorecard.example.com/tv

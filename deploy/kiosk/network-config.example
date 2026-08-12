@@ -1,0 +1,31 @@
+# Scorecard kiosk - cloud-init network config.
+#
+# Copy to the FAT boot partition as: network-config
+#
+# Both interfaces are `optional: true` so a missing one never stalls boot:
+# a wired unit must not wait on absent Wi-Fi, and vice versa.
+#
+# `password` accepts either the plaintext passphrase or a 64-hex-char PSK.
+# A precomputed PSK avoids storing the passphrase, but it is derived from the
+# SSID, so it breaks silently if the SSID is ever renamed. Derive one with:
+#   wpa_passphrase "SSID" "passphrase"
+#
+# NOTE: cloud-init only re-applies this when it sees a NEW instance-id. Editing
+# this file alone changes nothing on an already-provisioned unit - see
+# "Repointing or re-provisioning a unit" in README.md.
+
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: true
+      dhcp6: true
+      optional: true
+  wifis:
+    wlan0:
+      dhcp4: true
+      regulatory-domain: "US"
+      access-points:
+        "YOUR_WIFI_SSID":
+          password: "YOUR_WIFI_PASSPHRASE"
+      optional: true

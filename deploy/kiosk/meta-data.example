@@ -1,0 +1,17 @@
+# Scorecard kiosk - cloud-init instance identity.
+#
+# Copy to the FAT boot partition as: meta-data  (no file extension)
+#
+# The instance-id is the lever that decides whether cloud-init re-provisions.
+# If it matches what the unit ran last boot, cloud-init "restores from cache"
+# and skips re-applying network config and write_files - even if those files
+# changed. Bump it to force a full re-provision.
+#
+# It appears in TWO places and they must agree:
+#   1. here
+#   2. the `ds=nocloud;i=<instance-id>` fragment in cmdline.txt
+#
+# Convention: <product>-<unit serial>-<revision>, so a re-provision is a
+# revision bump and stays traceable to the physical unit.
+
+instance-id: scorecard-kiosk-0001-r1
