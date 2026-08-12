@@ -259,6 +259,64 @@ def test_admin_reset_link_refused_for_a_shared_channel_user(env, sent):
     assert sent == []
 
 
+# ------------------------------------------------------ throttle and reset
+def burn_the_attempt_limit(client):
+    """What forgetting your password looks like from the server."""
+    for _ in range(6):
+        client.post("/login", data={"email": "ed@x.co", "password": "wrong-guess"})
+    r = client.post("/login", data={"email": "ed@x.co", "password": PW})
+    assert "Too many attempts" in r.text     # locked out even when correct
+
+
+def test_reset_clears_the_login_throttle(env):
+    """The bug this exists to prevent: the reset appears to do nothing.
+
+    _throttled runs before the password is ever verified, so a counter left
+    over from the forgotten-password attempts rejects the NEW password too -
+    while passkey sign-in keeps working, because that path has no throttle."""
+    c = TestClient(env)
+    burn_the_attempt_limit(c)
+
+    with dbm.get_db() as con:
+        token = create_reset_link(con, 2)
+    arrive(c, token)
+    c.post("/reset", data={"new": NEW})
+
+    fresh = TestClient(env)
+    r = fresh.post("/login", data={"email": "ed@x.co", "password": NEW})
+    assert "Too many attempts" not in r.text and "Wrong email" not in r.text
+    assert fresh.get("/account").status_code == 200
+
+
+def test_the_admin_temp_password_is_not_refused_by_the_throttle(env):
+    """Same trap on the other reset path: the admin hands over a temp password
+    that the throttle then rejects."""
+    c = TestClient(env)
+    burn_the_attempt_limit(c)
+    r = admin(env).post("/admin/users/2/reset")
+    temp = r.text.split('class="mono">')[1].split("</span>")[0]
+
+    fresh = TestClient(env)
+    assert "Too many attempts" not in fresh.post(
+        "/login", data={"email": "ed@x.co", "password": temp}).text
+
+
+def test_clearing_is_scoped_to_the_one_identity(env):
+    """A reset must not hand everyone else a fresh set of guesses."""
+    c = TestClient(env)
+    for _ in range(6):
+        c.post("/login", data={"email": "sh@x.co", "password": "wrong-guess"})
+    burn_the_attempt_limit(c)
+
+    with dbm.get_db() as con:
+        token = create_reset_link(con, 2)
+    arrive(c, token)
+    c.post("/reset", data={"new": NEW})
+
+    assert "Too many attempts" in TestClient(env).post(
+        "/login", data={"email": "sh@x.co", "password": PW}).text
+
+
 # --------------------------------------------------------------- readiness
 def check(con):
     return next(c for c in readiness.local_checks(con, None)

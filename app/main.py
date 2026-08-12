@@ -226,6 +226,26 @@ def _record_failure(key: str) -> None:
     _login_failures.setdefault(key, []).append(time.monotonic())
 
 
+def _clear_throttle(email: str) -> None:
+    """Drop every login-failure bucket for this identity, across all IPs.
+
+    Both reset paths must call this, or the recovery flow silently undoes
+    itself. The person who resets a password is BY DEFINITION the person who
+    just burned through the attempt limit - that is what "I forgot my
+    password" looks like from the server - and _throttled runs before the
+    password is ever verified, so the correct new password gets rejected
+    exactly like the forgotten one. The symptom is maddening: passkey sign-in
+    works (no throttle on that path) while the password you just set does not.
+
+    Safe to clear: reaching either caller means control of the account was
+    already proven - a reset token delivered to a private channel, or an
+    admin. Keyed by IP and email, so every bucket for the email goes: the
+    reset is often finished on a different device than the failed attempts."""
+    suffix = f":{email.strip().lower()}"
+    for k in [k for k in _login_failures if k.endswith(suffix)]:
+        _login_failures.pop(k, None)
+
+
 @app.post("/login")
 def login(request: Request, email: str = Form(...), password: str = Form(...),
           con: sqlite3.Connection = Depends(db_dep)):
@@ -410,6 +430,9 @@ def reset_submit(request: Request, new: str = Form(...),
         return render(request, "reset.html", valid=True, min_len=PASSWORD_MIN,
                       error=f"Password must be {PASSWORD_MIN}+ characters.")
     complete_password_reset(con, uid, new)
+    who = con.execute("SELECT email FROM users WHERE id = ?", (uid,)).fetchone()
+    if who is not None:
+        _clear_throttle(who["email"])
     # Signed in on the new password, after every other session was dropped.
     resp = RedirectResponse("/", status_code=303)
     resp.delete_cookie(RESET_COOKIE, path="/reset")
@@ -1034,6 +1057,7 @@ def reset_password(uid: int, request: Request, user=Depends(require_admin),
     con.execute("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
                 (hash_password(pw), uid))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
+    _clear_throttle(target["email"])   # or the temp password is refused too
     return _users_page(request, con, user,
                        temp_password=pw, temp_user=target["display_name"])
 
