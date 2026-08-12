@@ -94,10 +94,20 @@ def test_enabled_views_are_what_rotates(env):
 
 def test_a_view_with_nothing_to_show_is_skipped(env):
     """'Act on this' is empty exactly when the company is doing well. Rotating
-    onto a blank screen would make the best case look like a fault."""
+    onto a blank screen would make the best case look like a fault.
+
+    The entry matters: a metric with no number goes stale once the week's
+    Wednesday 08:00 deadline passes, which is an action item. Without it this
+    test passed on a Tuesday and failed on a Wednesday - it was asserting the
+    day of the week, not the behaviour."""
     with dbm.get_db() as con:
-        dbm.set_setting(con, "display_views", "act")   # no reds, no stales
+        dbm.set_setting(con, "display_views", "act")
         dbm.set_setting(con, "display_rotate_seconds", "30")
+        con.execute(
+            """INSERT INTO entries (metric_id, week_start, value_numeric,
+                                    source, entered_by_user_id)
+               VALUES (1, ?, 10, 'manual', 1)""",
+            (wk.last_closed_week(datetime.now(timezone.utc)).isoformat(),))
     assert "Company Scorecard" in body(TestClient(env))   # fell back to the board
 
 
