@@ -759,6 +759,61 @@ def _screensaver_active(con: sqlite3.Connection, now: datetime) -> bool:
         dbm.get_setting(con, "screensaver_end", "06:00") or "")
 
 
+# ---- switchable TV views
+# Rebuilt server-side after the five client-switched views were removed in
+# 71944be. The board stays the default and the others are built from the SAME
+# TvVM that gridm.build_tv already returns - a view is a different arrangement
+# of the one board, never a second query path.
+TV_VIEWS = ("board", "act", "key")
+TV_VIEW_LABELS = {"board": "Full board",
+                  "act": "Act on this",
+                  "key": "Key metrics"}
+TV_ROTATE_DEFAULT = 45
+# The poll is the only thing that advances a rotation, so a period shorter than
+# it would just be the poll interval with extra steps.
+TV_ROTATE_MIN = 10
+
+
+def _enabled_views(con: sqlite3.Connection) -> list[str]:
+    raw = dbm.get_setting(con, "display_views", "board") or ""
+    views = [v.strip() for v in raw.split(",") if v.strip() in TV_VIEWS]
+    return views or ["board"]
+
+
+def _view_has_content(view: str, tv) -> bool:
+    """Whether a view has anything to say right now.
+
+    Rotation skips the ones that do not. An unattended TV showing an empty
+    panel for 45 seconds reads as broken, and 'Act on this' is empty exactly
+    when the company is doing well - the best case must not look like a
+    fault."""
+    if view == "act":
+        return bool(tv.actions)
+    if view == "key":
+        return any(r.is_key for col in tv.columns for sec in col for r in sec.rows)
+    return True
+
+
+def _tv_view(con: sqlite3.Connection, tv, now: datetime, override: str = "") -> str:
+    """The view this render shows: an explicit ?view= if it is enabled and has
+    content, otherwise the clock-driven rotation over the enabled views."""
+    enabled = _enabled_views(con)
+    if override in enabled and _view_has_content(override, tv):
+        return override
+    live = [v for v in enabled if _view_has_content(v, tv)]
+    seconds = _rotate_seconds(con)
+    return wk.rotation_pick(now, live or ["board"], seconds) or "board"
+
+
+def _rotate_seconds(con: sqlite3.Connection) -> int:
+    try:
+        n = int(dbm.get_setting(con, "display_rotate_seconds",
+                                str(TV_ROTATE_DEFAULT)) or 0)
+    except ValueError:
+        return TV_ROTATE_DEFAULT
+    return 0 if n <= 0 else max(TV_ROTATE_MIN, n)
+
+
 def _sleep_context(now: datetime) -> dict:
     local = now.astimezone(wk.BUSINESS_TZ)
     mins = local.hour * 60 + local.minute
@@ -772,30 +827,36 @@ def _sleep_context(now: datetime) -> dict:
 
 
 @app.get("/display", response_class=HTMLResponse)
-def display_page(request: Request, token: str = "",
+def display_page(request: Request, token: str = "", view: str = "",
                  real: sqlite3.Connection = Depends(db_dep),
                  con: sqlite3.Connection = Depends(data_db_dep)):
     _check_display_token(real, token)
-    if _screensaver_active(real, datetime.now(timezone.utc)):
+    now = datetime.now(timezone.utc)
+    if _screensaver_active(real, now):
         return render(request, "display.html", tv=None, token=token,
-                      sleep=_sleep_context(datetime.now(timezone.utc)))
+                      pinned="", sleep=_sleep_context(now))
     tv, rendered_at = _tv_context(con)
+    # `pinned` rides into the poll URL so a human who chose a view keeps it;
+    # the TV passes nothing and therefore rotates.
     return render(request, "display.html", tv=tv, token=token,
+                  view=_tv_view(real, tv, now, view), pinned=view,
                   rendered_at=rendered_at)
 
 
 @app.get("/display/body", response_class=HTMLResponse)
-def display_body(request: Request, token: str = "",
+def display_body(request: Request, token: str = "", view: str = "",
                  real: sqlite3.Connection = Depends(db_dep),
                  con: sqlite3.Connection = Depends(data_db_dep)):
     _check_display_token(real, token)
-    if _screensaver_active(real, datetime.now(timezone.utc)):
+    now = datetime.now(timezone.utc)
+    if _screensaver_active(real, now):
         html = templates.env.get_template("_display_sleep.html").render(
-            sleep=_sleep_context(datetime.now(timezone.utc)))
+            sleep=_sleep_context(now))
     else:
         tv, rendered_at = _tv_context(con)
         html = templates.env.get_template("_display_body.html").render(
-            tv=tv, rendered_at=rendered_at)
+            tv=tv, rendered_at=rendered_at,
+            view=_tv_view(real, tv, now, view))
     return HTMLResponse(f'<div class="board" id="tvroot">{html}</div>')
 
 
@@ -1300,6 +1361,10 @@ def admin_settings(request: Request, saved: str = "", user=Depends(require_admin
                   screensaver_enabled=dbm.get_setting(con, "screensaver_enabled", "0") == "1",
                   screensaver_start=dbm.get_setting(con, "screensaver_start", "21:00"),
                   screensaver_end=dbm.get_setting(con, "screensaver_end", "06:00"),
+                  view_labels=[(v, TV_VIEW_LABELS[v]) for v in TV_VIEWS],
+                  enabled_views=_enabled_views(con),
+                  rotate_seconds=_rotate_seconds(con),
+                  rotate_min=TV_ROTATE_MIN,
                   demo_enabled=dbm.get_setting(con, "display_demo_data", "0") == "1",
                   display_months=int(dbm.get_setting(con, "display_months", "2")),
                   slack_signing_secret=dbm.get_setting(con, "slack_signing_secret") or "",
@@ -1350,6 +1415,23 @@ def save_display_months(display_months: int = Form(...), user=Depends(require_ad
                         con: sqlite3.Connection = Depends(db_dep)):
     dbm.set_setting(con, "display_months", str(max(1, min(4, display_months))))
     return _settings_saved("display-window")
+
+
+@app.post("/admin/settings/tv-views")
+def save_tv_views(views: list[str] = Form([]), rotate_seconds: int = Form(TV_ROTATE_DEFAULT),
+                  user=Depends(require_admin),
+                  con: sqlite3.Connection = Depends(db_dep)):
+    """Which views the TV cycles through, and how long each is up.
+
+    Unticking everything falls back to the full board rather than saving an
+    empty rotation: the TV has no other screen to fall back to, and a blank
+    one cannot be fixed from the TV itself."""
+    chosen = [v for v in TV_VIEWS if v in views] or ["board"]
+    dbm.set_setting(con, "display_views", ",".join(chosen))
+    n = max(0, min(3600, rotate_seconds))
+    dbm.set_setting(con, "display_rotate_seconds",
+                    str(0 if n == 0 else max(TV_ROTATE_MIN, n)))
+    return _settings_saved("tv-views")
 
 
 @app.post("/admin/settings/rotate-display-token")

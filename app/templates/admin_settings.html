@@ -14,6 +14,28 @@
     <button class="btn secondary sm" onclick="return confirm('Rotate? The TV will need the new URL.')">Rotate display token</button>
   </form>
 </div>
+<div class="panel" id="tv-views" style="max-width:640px">
+  {% if saved == "tv-views" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
+  <h2>TV views</h2>
+  <p class="note">Which boards the TV cycles through, and how long each one stays up. The TV decides server-side on its own poll, so a unit with no keyboard rotates by itself and two screens in the same room stay in step. A view with nothing to show is skipped &mdash; &ldquo;Act on this&rdquo; is empty exactly when nothing is red, and a blank screen reads as broken. Pick one view and set the seconds to 0 to hold it still.</p>
+  <form method="post" action="/admin/settings/tv-views">
+    <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:14px">
+      {% for key, label in view_labels %}
+      <label style="display:flex; align-items:center; gap:7px; font-weight:normal">
+        <input type="checkbox" name="views" value="{{ key }}" {% if key in enabled_views %}checked{% endif %}>
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
+    <div style="display:flex; gap:10px; align-items:end">
+      <div><label>Seconds per view (0 = no rotation)</label>
+        <input type="number" name="rotate_seconds" min="0" max="3600"
+               value="{{ rotate_seconds }}" style="width:130px"></div>
+      <button class="btn" type="submit">Save</button>
+    </div>
+  </form>
+  <p class="note" style="margin-top:10px">Below {{ rotate_min }} seconds is rounded up: the board only changes when it polls, so a shorter setting would just be the poll interval with extra steps.</p>
+</div>
 <div class="panel" id="screensaver" style="max-width:640px">
   {% if saved == "screensaver" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <div style="display:flex; align-items:center; gap:12px">

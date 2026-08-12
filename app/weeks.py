@@ -136,3 +136,23 @@ def in_nightly_window(now: datetime, start: str, end: str,
         return False
     t = now.astimezone(tz).time()
     return (s <= t < e) if s < e else (t >= s or t < e)
+
+
+def rotation_pick(now: datetime, options: list, seconds: int):
+    """Which of `options` a clock-driven rotation is showing at `now`.
+
+    Derived from the wall clock rather than from a cursor anyone has to keep,
+    which is the whole reason this is usable on the TV. The kiosk runs cog on
+    DRM with no keyboard, mouse or remote, so a view you have to press a button
+    to change is a view that never changes; and display.html is required to
+    hold no client-side state, so a "current view" counter has nowhere honest
+    to live. As a function of time it needs no storage, survives a reload or a
+    power cut, and two screens in the same room agree without talking.
+
+    seconds <= 0 means no rotation - the first option, forever. Returns None
+    only when there is nothing to choose from."""
+    if not options:
+        return None
+    if seconds <= 0:
+        return options[0]
+    return options[int(now.timestamp()) // seconds % len(options)]

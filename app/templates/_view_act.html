@@ -1,0 +1,27 @@
+{# "Act on this": the footer strip of the full board, given the whole screen.
+   Same tv.actions the board's footer uses - reds with their escalation step
+   and stales - just readable from across the room. Rotation skips this view
+   when tv.actions is empty (main._view_has_content), so the clear state below
+   only shows on a pinned ?view=act. #}
+<section class="v-act" style="--n:{{ tv.actions|length if tv.actions else 1 }}">
+  {% for a in tv.actions %}
+  <article class="va-card{{ ' stale' if a.kind != 'red' }}">
+    <div class="va-badge {{ 'r' if a.kind == 'red' else 's' }}">{{ a.badge }}</div>
+    <h2 class="va-name">{{ a.name }}</h2>
+    <div class="va-num">{{ a.value_display }}{% if a.target_display != '-' %}<small>vs {{ a.target_display }}</small>{% endif %}</div>
+    <div class="va-step">{{ a.next_step }}</div>
+    <div class="va-who">{% if a.initials %}<i class="b-av">{{ a.initials }}</i>{% endif %}<b>{{ a.dri_name }}</b></div>
+  </article>
+  {% else %}
+  <article class="va-card clear">
+    <h2 class="va-name">All clear</h2>
+    <div class="va-step">Every metric updated, none red.</div>
+  </article>
+  {% endfor %}
+  {% if tv.more_actions %}
+  <article class="va-card more">
+    <div class="va-num">+{{ tv.more_actions }}</div>
+    <div class="va-step">more in edit mode</div>
+  </article>
+  {% endif %}
+</section>

@@ -12,7 +12,10 @@
    demo data, goal band) reaches the TV, and a minute of staring at a stale
    board reads as broken. The board is ~1.3 KB gzipped, so the extra requests
    cost nothing. #}
-<body class="tvboard" hx-get="/display/body?token={{ token }}" hx-trigger="every 10s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
+{# The poll carries a pinned ?view= and nothing else. The TV passes none, so
+   every poll re-asks the server which view the clock is on - that is what
+   makes rotation work with no client-side state. #}
+<body class="tvboard" hx-get="/display/body?token={{ token }}{% if pinned %}&amp;view={{ pinned }}{% endif %}" hx-trigger="every 10s" hx-select="#tvroot" hx-target="#tvroot" hx-swap="outerHTML">
 <div class="board" id="tvroot">
   {% if sleep %}{% include "_display_sleep.html" %}{% else %}{% include "_display_body.html" %}{% endif %}
 </div>

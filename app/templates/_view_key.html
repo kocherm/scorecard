@@ -1,0 +1,29 @@
+{# "Key metrics": the starred rows only, at a size that reads from a desk away.
+   Flattened out of tv.columns rather than re-queried - build_tv is the one
+   path. Rotation skips this view when nothing is starred, so the empty case
+   below only shows on a pinned ?view=key. #}
+{% set keys = [] %}
+{% for col in tv.columns %}{% for sec in col %}{% for r in sec.rows %}
+  {% if r.is_key %}{% set _ = keys.append(r) %}{% endif %}
+{% endfor %}{% endfor %}{% endfor %}
+<section class="v-key" style="--n:{{ keys|length if keys else 1 }}">
+  {% for r in keys %}
+  <article class="vk-tile">
+    <div class="vk-name">{{ r.name }}</div>
+    <div class="vk-num {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
+    <div class="vk-target">
+      {%- if r.metric_type == 'numeric' and r.target_display != '-' %}target {{ r.target_display }}
+      {%- elif r.week_note %}{{ r.week_note }}{% endif %}
+      {%- if r.red_streak >= 1 %} <em class="b-flag red">red wk {{ r.red_streak }}</em>
+      {%- elif r.latest_state == 'stale' %} <em class="b-flag">no data</em>{% endif %}
+    </div>
+    <div class="vk-trend">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></div>
+    <div class="vk-who">{% if r.initials %}<i class="b-av">{{ r.initials }}</i><b>{{ r.dri_first }}</b>{% endif %}</div>
+  </article>
+  {% else %}
+  <article class="vk-tile">
+    <div class="vk-name">No key metrics</div>
+    <div class="vk-target">Star a metric in Admin &gt; Metrics to show it here.</div>
+  </article>
+  {% endfor %}
+</section>
