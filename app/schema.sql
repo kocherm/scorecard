@@ -14,8 +14,15 @@ CREATE TABLE IF NOT EXISTS users (
     notify_channel  TEXT,
     notify_address  TEXT,
     must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0,1)),
+    -- Opaque per-user handle sent to authenticators as the WebAuthn user id.
+    -- Not the row id: it is stored on the passkey and readable by any site the
+    -- authenticator is later asked about, so it must carry no meaning. Minted
+    -- lazily on first passkey registration; NULL until then.
+    webauthn_handle TEXT,
     created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_webauthn_handle
+    ON users(webauthn_handle) WHERE webauthn_handle IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash   TEXT PRIMARY KEY,
@@ -136,15 +143,52 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
     UNIQUE (metric_id, week_start, alert_type)
 );
 
--- Pre-authenticated check-in links delivered over Slack DM. Multi-use until
--- expiry (Slack's link crawler would burn single-use tokens); hash stored.
+-- Pre-authenticated links delivered over a private message channel. Multi-use
+-- until expiry (Slack's link crawler would burn single-use tokens); hash stored.
+-- purpose is load-bearing, not descriptive: a 'checkin' link is DM'd weekly and
+-- lives for 7 days, a 'reset' link authorises setting a new password and lives
+-- for two hours, and neither may ever be redeemed at the other's endpoint.
 CREATE TABLE IF NOT EXISTS magic_links (
     id           INTEGER PRIMARY KEY,
     token_hash   TEXT    NOT NULL UNIQUE,
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose      TEXT    NOT NULL DEFAULT 'checkin'
+                 CHECK (purpose IN ('checkin','reset')),
     created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
     expires_at   TEXT    NOT NULL,
     last_used_at TEXT
+);
+
+-- Passkeys (WebAuthn). Strictly additive: every user keeps a password, because
+-- a passkey lives on one device and the recovery path for a lost one is the
+-- password path. Nothing here can be used to sign in on its own - a credential
+-- only proves possession of the private key for a challenge this server issued.
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id            INTEGER PRIMARY KEY,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id TEXT    NOT NULL UNIQUE,   -- base64url, as the browser sends it
+    public_key    BLOB    NOT NULL,
+    -- Authenticators that keep a counter bump it every assertion; a value that
+    -- goes backwards means a cloned credential. Platform passkeys (iCloud,
+    -- Google Password Manager) sync and always report 0, so 0 means "no signal".
+    sign_count    INTEGER NOT NULL DEFAULT 0,
+    transports    TEXT,                      -- JSON array, for allowCredentials hints
+    name          TEXT    NOT NULL,          -- user-supplied: "MacBook Touch ID"
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_credentials(user_id);
+
+-- Outstanding WebAuthn challenges. Server-side and single-use by deletion: the
+-- whole point of the ceremony is that the server chose the challenge, so it
+-- cannot be carried in anything the client could pick (a cookie it can set, a
+-- form field it can edit). user_id is NULL for sign-in, which is usernameless -
+-- the credential itself names the account.
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+    challenge  TEXT PRIMARY KEY,             -- base64url
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    purpose    TEXT NOT NULL CHECK (purpose IN ('register','login')),
+    expires_at TEXT NOT NULL
 );
 
 -- The numbered metric list each user was shown in their last nudge message

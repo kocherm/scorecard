@@ -9,6 +9,9 @@
 {% if temp_password %}
 <div class="flash ok">Temporary password for <strong>{{ temp_user }}</strong>: <span class="mono">{{ temp_password }}</span> - share it now; it is not shown again. They will be asked to change it on first sign-in.</div>
 {% endif %}
+{% if flash %}
+<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>
+{% endif %}
 <div class="panel">
   <table class="list">
     <tr><th>Name</th><th>Email</th><th>Role</th><th>Notifications</th><th>Status</th><th></th></tr>
@@ -44,8 +47,13 @@
           <button class="btn secondary sm" title="See the app exactly as {{ u['display_name'] }} sees it">View as</button>
         </form>
         {% endif %}
+        {% if u['is_active'] and u['id'] in reachable %}
+        <form method="post" action="/admin/users/{{ u['id'] }}/reset-link" style="display:inline">
+          <button class="btn secondary sm" title="Message {{ u['display_name'] }} a link to set their own password. Their current password keeps working until they use it.">Send reset link</button>
+        </form>
+        {% endif %}
         <form method="post" action="/admin/users/{{ u['id'] }}/reset" style="display:inline">
-          <button class="btn secondary sm">Reset password</button>
+          <button class="btn secondary sm" title="Set a temporary password to read out. Signs {{ u['display_name'] }} out everywhere immediately.">Reset password</button>
         </form>
         {% if u['id'] != user['id'] %}
         <form method="post" action="/admin/users/{{ u['id'] }}/toggle" style="display:inline">

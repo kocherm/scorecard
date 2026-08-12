@@ -9,3 +9,11 @@ seed_data.local.json
 SPEC.local.md
 deploy/DEPLOY.local.md
 *.local.json
+
+# Kiosk provisioning: only the .example templates are tracked. A filled-in copy
+# holds a customer's Wi-Fi passphrase and board URL, so never commit one.
+deploy/kiosk/user-data
+deploy/kiosk/network-config
+deploy/kiosk/meta-data
+deploy/kiosk/wifi-credentials
+deploy/kiosk/scorecard-kiosk.conf

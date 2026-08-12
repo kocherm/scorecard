@@ -9,14 +9,66 @@
 {% if user['must_change_password'] %}
 <div class="flash warn">You are using a temporary password. Set your own below.</div>
 {% endif %}
+{% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
 <div class="panel" style="max-width:480px">
   <h2>Change password</h2>
   <form method="post" action="/account/password">
     <label>Current password</label>
-    <input type="password" name="current" required>
-    <label>New password (10+ characters)</label>
-    <input type="password" name="new" minlength="10" required>
+    <input type="password" name="current" autocomplete="current-password" required>
+    <label>New password ({{ min_len }}+ characters)</label>
+    <input type="password" name="new" minlength="{{ min_len }}"
+           autocomplete="new-password" required>
     <button class="btn" type="submit" style="margin-top:14px">Update password</button>
   </form>
 </div>
+
+<div class="panel" style="max-width:480px" data-passkey-block>
+  <h2>Passkeys</h2>
+  <p class="page-sub">Sign in with Touch ID, Windows Hello, or your phone
+    instead of typing a password. Your password still works - keep it, it is
+    how you get back in if you lose the device.</p>
+  <div id="passkey-msg"></div>
+  {# View-as shows the list but not the controls: a passkey added here would
+     belong to the person being viewed, not the admin doing the viewing, and
+     nothing they could later do would take it away. The 403 from require_self
+     is the actual control; this is so nobody meets it by surprise. #}
+  {% set viewing = request.state.impersonator %}
+  {% if keys %}
+  <table class="list">
+    <tr><th>Name</th><th>Added</th><th>Last used</th>{% if not viewing %}<th></th>{% endif %}</tr>
+    {% for k in keys %}
+    <tr>
+      <td>{{ k['name'] }}</td>
+      <td>{{ k['created_at'][:10] }}</td>
+      <td>{{ k['last_used_at'][:10] if k['last_used_at'] else 'never' }}</td>
+      {% if not viewing %}
+      <td>
+        <form method="post" action="/account/passkeys/{{ k['id'] }}/delete" style="display:inline">
+          <button class="btn danger sm">Remove</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="page-sub">No passkeys yet.</p>
+  {% endif %}
+  {% if viewing %}
+  <p class="page-sub" style="margin-top:14px">Passkeys can only be added or
+    removed by {{ user['display_name'] }} themselves. Exit view-as to manage
+    your own.</p>
+  {% else %}
+  <div style="display:flex; gap:10px; align-items:end; margin-top:14px">
+    <div style="flex:1">
+      <label for="passkey-name">Name this device</label>
+      <input type="text" id="passkey-name" maxlength="60" placeholder="Work laptop">
+    </div>
+    <button class="btn" type="button" id="passkey-add">Add a passkey</button>
+  </div>
+  {% endif %}
+</div>
+{% if not request.state.impersonator %}
+<script src="/static/passkey.js?v={{ static_v }}" defer></script>
+{% endif %}
 {% endblock %}

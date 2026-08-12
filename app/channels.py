@@ -25,6 +25,13 @@ log = logging.getLogger("scorecard.channels")
 CHANNELS = ("slack", "teams", "gchat", "sms", "whatsapp", "telegram")
 TWO_WAY = ("slack", "sms", "whatsapp", "telegram")  # typed replies supported
 
+# Channels that reach ONE person. Teams and Google Chat are incoming webhooks
+# into a shared channel/space, which is fine for "Dana still owes three
+# numbers" and catastrophic for a password reset link: the whole team would be
+# able to take over the account by clicking it. Anything carrying a credential
+# checks deliver_secret(), never ready().
+PRIVATE = ("slack", "sms", "whatsapp", "telegram")
+
 LABELS = {"slack": "Slack", "teams": "Teams", "gchat": "Google Chat",
           "sms": "SMS", "whatsapp": "WhatsApp", "telegram": "Telegram"}
 
@@ -55,6 +62,15 @@ def ready(con: sqlite3.Connection, u: sqlite3.Row) -> bool:
     if ch == "telegram":
         return bool(dbm.get_setting(con, "telegram_bot_token") and u["notify_address"])
     return False
+
+
+def deliver_secret(con: sqlite3.Connection, u: sqlite3.Row) -> bool:
+    """Can this user be sent something only they may read - a password reset
+    link - right now? Configured (ready) AND private (PRIVATE). A user on
+    Teams or Google Chat is reachable but not privately, so self-serve reset
+    is not offered to them and the admin temp-password path stays their route
+    back in."""
+    return user_channel(u) in PRIVATE and ready(con, u)
 
 
 def link(channel: str, url: str, label: str) -> str:

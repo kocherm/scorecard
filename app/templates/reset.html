@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Set a new password - Aprendio Scorecard</title>
+{% include "_head_icons.html" %}
+<link rel="stylesheet" href="/static/scorecard.css?v={{ static_v }}">
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="brandline"><span class="seam"></span><span class="wordmark">APRENDIO</span></div>
+    <h1>Set a new password</h1>
+    {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+    {% if valid %}
+      <p class="page-sub">Choosing a new password signs you out on every other
+        device.</p>
+      <form method="post" action="/reset">
+        <label for="new">New password ({{ min_len }}+ characters)</label>
+        <input type="password" id="new" name="new" minlength="{{ min_len }}"
+               autocomplete="new-password" required autofocus>
+        <button class="btn" type="submit">Set password and sign in</button>
+      </form>
+    {% else %}
+      <div class="flash err">This link is expired or has already been replaced
+        by a newer one.</div>
+      <p class="page-sub"><a href="/forgot">Request a new reset link</a></p>
+    {% endif %}
+    <p class="page-sub" style="margin-top:16px"><a href="/login">Back to sign in</a></p>
+  </div>
+</body>
+</html>

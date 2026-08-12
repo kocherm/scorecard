@@ -8,31 +8,35 @@ import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time as dt_time, timezone
-from functools import partial
+from functools import partial, wraps
 from pathlib import Path
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import (BackgroundTasks, Body, Depends, FastAPI, Form,
+                     HTTPException, Request, Response)
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from migrate import add_admin_scope, slack_two_way
+from migrate import passkeys as passkeys_migration
 
 from . import (alerts, channels, db as dbm, demo, entry_ops, grid as gridm,
-               readiness, weeks as wk)
+               passkeys, readiness, weeks as wk)
 from .api import router as api_router
 from .mcp import router as mcp_router
 from .inbound import router as inbound_router
 from .slack import router as slack_router
-from .auth import (ROTATE_GRACE_DAYS, ROTATE_GRACE_MAX, SESSION_COOKIE,
-                   consume_magic_link, create_magic_link,
+from .auth import (RESET_LINK_HOURS, ROTATE_GRACE_DAYS, ROTATE_GRACE_MAX,
+                   SESSION_COOKIE, complete_password_reset, consume_magic_link,
+                   create_magic_link, create_reset_link,
                    create_session, destroy_session, hash_password, new_api_token,
                    rotate_api_token,
-                   require_admin, require_editor, require_viewer, session_hash,
-                   user_from_request, verify_password)
+                   require_admin, require_editor, require_self, require_viewer,
+                   session_hash, user_from_request, verify_password)
 from .db import db_dep
 
 logging.basicConfig(level=logging.INFO)
@@ -42,10 +46,11 @@ BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.filters["qlabel"] = lambda w: wk.quarter_label(
     w if isinstance(w, date) else wk.parse_week(w))
-# Cache-buster: changes whenever the stylesheet changes, so browsers never
-# serve a stale scorecard.css after a deploy.
-templates.env.globals["static_v"] = str(int(
-    (BASE / "static" / "scorecard.css").stat().st_mtime))
+# Cache-buster: changes whenever any hand-written static asset does, so a
+# browser never serves a stale scorecard.css or passkey.js after a deploy.
+templates.env.globals["static_v"] = str(int(max(
+    (BASE / "static" / f).stat().st_mtime
+    for f in ("scorecard.css", "passkey.js"))))
 
 scheduler = BackgroundScheduler()
 
@@ -82,6 +87,11 @@ async def lifespan(app: FastAPI):
         if slack_two_way.needs_alerts_migration(con):
             slack_two_way.migrate_alerts(con)
             log.info("Migrated alerts_sent.alert_type to allow nudges")
+        # magic_links.purpose + users.webauthn_handle for DBs that predate
+        # password-reset links and passkeys. init_db above already made the two
+        # new tables (they are IF NOT EXISTS); columns need this.
+        for line in passkeys_migration.migrate(con):
+            log.info("Migration: %s", line)
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     scheduler.add_job(alerts.stale_sweep, CronTrigger(
@@ -185,9 +195,17 @@ async def redirect_handler(request: Request, exc: HTTPException):
 
 
 # ---------------------------------------------------------------- auth pages
+def _login_render(request: Request, con: sqlite3.Connection,
+                  error: Optional[str]) -> HTMLResponse:
+    # The passkey button is hidden until at least one exists anywhere: on a
+    # fresh instance it could only ever pop an empty authenticator prompt.
+    return render(request, "login.html", error=error,
+                  passkeys_on=passkeys.any_registered(con))
+
+
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    return render(request, "login.html", error=None)
+def login_page(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    return _login_render(request, con, None)
 
 
 # Simple in-memory login throttle: 5 failures per identity per 15 minutes.
@@ -213,13 +231,13 @@ def login(request: Request, email: str = Form(...), password: str = Form(...),
           con: sqlite3.Connection = Depends(db_dep)):
     key = f"{(request.client.host if request.client else '?')}:{email.strip().lower()}"
     if _throttled(key):
-        return render(request, "login.html",
-                      error="Too many attempts. Wait 15 minutes and try again.")
+        return _login_render(request, con,
+                             "Too many attempts. Wait 15 minutes and try again.")
     row = con.execute("SELECT * FROM users WHERE email = ? AND is_active = 1",
                       (email.strip(),)).fetchone()
     if row is None or not verify_password(password, row["password_hash"]):
         _record_failure(key)
-        return render(request, "login.html", error="Wrong email or password.")
+        return _login_render(request, con, "Wrong email or password.")
     _login_failures.pop(key, None)
     token = create_session(con, row["id"])
     dest = "/account" if row["must_change_password"] else "/"
@@ -247,9 +265,239 @@ def logout(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     return resp
 
 
+# ------------------------------------------------------- forgotten passwords
+PASSWORD_MIN = 10
+
+# What every /forgot POST says, whatever happened. Saying "no such account"
+# would turn the form into a list of who works here, and saying "sent!" only on
+# success would say the same thing more quietly.
+FORGOT_SENT = ("If that address has an account with a message channel set up, "
+               f"a reset link is on its way. It expires in {RESET_LINK_HOURS} hours.")
+
+
+def _secret_base_url(con: sqlite3.Connection) -> str:
+    """Base URL for a message that carries a credential - the configured
+    setting ONLY, never request.base_url.
+
+    Everywhere else, falling back to the request's own address is a
+    convenience. Here it would be host-header injection: the app also binds
+    the LAN directly, so anyone who can reach it can send a request with a
+    Host of their choosing and have the reset link in someone's DM point at
+    their server. An unset public base URL means no reset link goes out, which
+    Admin > Setup & status reports rather than leaving to a log line."""
+    return (dbm.get_setting(con, "public_base_url") or "").rstrip("/")
+
+
+def _send_reset_link(con: sqlite3.Connection,
+                     target: sqlite3.Row) -> tuple[bool, str]:
+    """Mint a reset link and deliver it. Returns (ok, channel-or-reason).
+
+    Delivery is Slack DM / Telegram / SMS, never Teams or Google Chat: those
+    are shared-space webhooks, so a link posted there is a link the whole team
+    can use (channels.deliver_secret). One helper for both callers - the
+    self-serve /forgot page and the admin button - so there is one message and
+    one set of preconditions rather than two that drift."""
+    if not channels.deliver_secret(con, target):
+        return False, ("has no private message channel set up, so a reset link "
+                       "cannot be delivered")
+    base = _secret_base_url(con)
+    if not base:
+        # No public base URL means no clickable link to send. Covered by the
+        # reset_delivery readiness check; the caller says so out loud.
+        return False, "cannot be sent until the public base URL is set in Settings"
+    token = create_reset_link(con, target["id"])
+    ch = channels.user_channel(target)
+    url = f"{base}/reset?t={token}"
+    text = (f"Password reset for the Company Scorecard. "
+            f"{channels.link(ch, url, 'Set a new password')}\n"
+            f"The link works for {RESET_LINK_HOURS} hours. "
+            f"If you did not ask for this, ignore it - "
+            f"your current password still works.")
+    if not alerts.send_direct(con, target, text):
+        return False, f"{channels.LABELS[ch]} would not accept the message"
+    return True, ch
+
+
+def _deliver_reset(user_id: int) -> None:
+    """Background half of /forgot. Opens its own connection: the request's is
+    closed by dependency teardown before background tasks run (same reason
+    slack.handle_dm does)."""
+    with dbm.get_db() as con:
+        target = con.execute("SELECT * FROM users WHERE id = ? AND is_active = 1",
+                             (user_id,)).fetchone()
+        if target is None:
+            return
+        ok, why = _send_reset_link(con, target)
+        if not ok:
+            log.warning("password reset for user %s not sent: %s", user_id, why)
+
+
+@app.get("/forgot", response_class=HTMLResponse)
+def forgot_page(request: Request):
+    return render(request, "forgot.html", error=None, sent=None)
+
+
+@app.post("/forgot", response_class=HTMLResponse)
+def forgot_send(request: Request, background: BackgroundTasks,
+                email: str = Form(...),
+                con: sqlite3.Connection = Depends(db_dep)):
+    """Ask for a reset link. Answers the same way whoever you ask about.
+
+    The send is deferred to a background task and nothing about it is awaited,
+    because delivery is an HTTP call to Slack/Telegram/Twilio: doing it inline
+    made a known address answer hundreds of milliseconds slower than an unknown
+    one, so the identical wording said nothing and the latency said everything.
+    What is left in the request is one indexed SELECT, taken on every path.
+
+    A user without a private channel gets no message and the same reply - the
+    admin temp-password path on Admin > Users is still their way back in."""
+    key = f"forgot:{(request.client.host if request.client else '?')}:{email.strip().lower()}"
+    if _throttled(key):
+        return render(request, "forgot.html", sent=None,
+                      error="Too many requests. Wait 15 minutes and try again.")
+    _record_failure(key)  # every attempt counts, not just the ones that miss
+
+    row = con.execute("SELECT id FROM users WHERE email = ? AND is_active = 1",
+                      (email.strip(),)).fetchone()
+    if row is not None:
+        background.add_task(_deliver_reset, row["id"])
+    return render(request, "forgot.html", error=None, sent=FORGOT_SENT)
+
+
+# The reset token, moved out of the URL on arrival. Same exchange the /checkin
+# magic link does: the token has to travel in a link, but it does not have to
+# stay in the address bar, the browser history, or every proxy access-log line
+# for the page. Path-scoped so it is not attached to any other request.
+RESET_COOKIE = "scorecard_reset"
+
+
+def _reset_cookie(resp: Response, request: Request, token: str) -> None:
+    resp.set_cookie(RESET_COOKIE, token, httponly=True, samesite="lax",
+                    path="/reset", max_age=RESET_LINK_HOURS * 3600,
+                    secure=request.url.scheme == "https")
+
+
+@app.get("/reset", response_class=HTMLResponse)
+def reset_page(request: Request, t: str = "",
+               con: sqlite3.Connection = Depends(db_dep)):
+    """Arrive with ?t=, continue without it.
+
+    A valid token is stashed in a path-scoped cookie and the browser is sent to
+    a clean /reset. The link stays multi-use until it expires, so Slack
+    unfurling the URL before the human clicks it still cannot burn it."""
+    if t:
+        if consume_magic_link(con, t, purpose="reset") is None:
+            return render(request, "reset.html", valid=False, error=None,
+                          min_len=PASSWORD_MIN)
+        resp = RedirectResponse("/reset", status_code=303)
+        _reset_cookie(resp, request, t)
+        return resp
+    token = request.cookies.get(RESET_COOKIE, "")
+    valid = bool(token) and consume_magic_link(con, token, purpose="reset") is not None
+    return render(request, "reset.html", valid=valid, error=None,
+                  min_len=PASSWORD_MIN)
+
+
+@app.post("/reset", response_class=HTMLResponse)
+def reset_submit(request: Request, new: str = Form(...),
+                 con: sqlite3.Connection = Depends(db_dep)):
+    uid = consume_magic_link(con, request.cookies.get(RESET_COOKIE, ""),
+                             purpose="reset")
+    if uid is None:
+        return render(request, "reset.html", valid=False, min_len=PASSWORD_MIN,
+                      error="That link has expired. Request a new one.")
+    if len(new) < PASSWORD_MIN:
+        return render(request, "reset.html", valid=True, min_len=PASSWORD_MIN,
+                      error=f"Password must be {PASSWORD_MIN}+ characters.")
+    complete_password_reset(con, uid, new)
+    # Signed in on the new password, after every other session was dropped.
+    resp = RedirectResponse("/", status_code=303)
+    resp.delete_cookie(RESET_COOKIE, path="/reset")
+    resp.set_cookie(SESSION_COOKIE, create_session(con, uid), httponly=True,
+                    samesite="lax", max_age=30 * 86400,
+                    secure=request.url.scheme == "https")
+    return resp
+
+
+# ----------------------------------------------------------------- passkeys
+def _passkey_json(fn):
+    """Ceremony endpoints answer JSON, including on failure: the caller is
+    fetch() inside passkey.js, which needs a message it can show rather than an
+    HTML error page it would have to ignore. A handler that already built its
+    own Response (to set the session cookie) is passed straight through.
+
+    Sync, like every other route here, and the body arrives through Body()
+    rather than `await request.json()`. That is not a style choice: db_dep
+    hands out a plain sqlite3 connection, which may only be used on the thread
+    that opened it. An async endpoint would run on the event loop while its
+    dependency ran in the threadpool, and every query would raise."""
+    @wraps(fn)   # keeps the signature FastAPI reads to build the dependencies
+    def wrapped(*a, **kw):
+        try:
+            out = fn(*a, **kw)
+        except passkeys.PasskeyError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return out if isinstance(out, Response) else JSONResponse(out)
+
+    return wrapped
+
+
+@app.post("/login/passkey/begin")
+@_passkey_json
+def passkey_login_begin(request: Request,
+                        con: sqlite3.Connection = Depends(db_dep)):
+    return json.loads(passkeys.begin_login(con, request))
+
+
+@app.post("/login/passkey/finish")
+@_passkey_json
+def passkey_login_finish(request: Request, body: dict = Body(...),
+                         con: sqlite3.Connection = Depends(db_dep)):
+    uid = passkeys.finish_login(con, request, body)
+    token = create_session(con, uid)
+    row = con.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+    resp = JSONResponse({"ok": True,
+                         "next": "/account" if row["must_change_password"] else "/"})
+    resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
+                    max_age=30 * 86400, secure=request.url.scheme == "https")
+    return resp
+
+
+@app.post("/account/passkeys/begin")
+@_passkey_json
+def passkey_register_begin(request: Request, user=Depends(require_self),
+                           con: sqlite3.Connection = Depends(db_dep)):
+    return json.loads(passkeys.begin_registration(con, request, user))
+
+
+@app.post("/account/passkeys/finish")
+@_passkey_json
+def passkey_register_finish(request: Request, body: dict = Body(...),
+                            user=Depends(require_self),
+                            con: sqlite3.Connection = Depends(db_dep)):
+    name = passkeys.finish_registration(con, request, user,
+                                        body.get("credential") or {},
+                                        body.get("name") or "")
+    return {"ok": True, "name": name}
+
+
+@app.post("/account/passkeys/{pk}/delete")
+def passkey_delete(pk: int, user=Depends(require_self),
+                   con: sqlite3.Connection = Depends(db_dep)):
+    passkeys.delete_credential(con, user["id"], pk)
+    return RedirectResponse("/account", status_code=303)
+
+
+def _account_render(request: Request, con: sqlite3.Connection, user, **ctx):
+    return render(request, "account.html", user=user, active="",
+                  min_len=PASSWORD_MIN,
+                  keys=passkeys.credentials_for(con, user["id"]), **ctx)
+
+
 @app.get("/account", response_class=HTMLResponse)
-def account_page(request: Request, user=Depends(require_viewer)):
-    return render(request, "account.html", user=user, active="")
+def account_page(request: Request, user=Depends(require_viewer),
+                 con: sqlite3.Connection = Depends(db_dep)):
+    return _account_render(request, con, user)
 
 
 @app.post("/account/password")
@@ -257,11 +505,12 @@ def change_password(request: Request, current: str = Form(...), new: str = Form(
                     user=Depends(require_viewer),
                     con: sqlite3.Connection = Depends(db_dep)):
     if not verify_password(current, user["password_hash"]):
-        return render(request, "account.html", user=user, active="",
-                      flash="Current password is wrong.", flash_kind="err")
-    if len(new) < 10:
-        return render(request, "account.html", user=user, active="",
-                      flash="New password must be 10+ characters.", flash_kind="err")
+        return _account_render(request, con, user,
+                               flash="Current password is wrong.", flash_kind="err")
+    if len(new) < PASSWORD_MIN:
+        return _account_render(
+            request, con, user, flash_kind="err",
+            flash=f"New password must be {PASSWORD_MIN}+ characters.")
     con.execute("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?",
                 (hash_password(new), user["id"]))
     return RedirectResponse("/", status_code=303)
@@ -672,12 +921,23 @@ def save_target(metric_id: int, year: int, quarter: int,
 
 
 # ---------------- users
+def _users_page(request: Request, con: sqlite3.Connection, user, **ctx):
+    users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
+    # Which rows may be offered "Send reset link": a private channel, configured.
+    # Computed here rather than in the template so the button cannot appear for
+    # a Teams/Google Chat user, whose "DM" is the whole team's channel.
+    for k in ("temp_password", "temp_user", "flash"):
+        ctx.setdefault(k, None)
+    return render(request, "admin_users.html", user=user, active="users",
+                  users=users, reachable={u["id"] for u in users
+                                          if channels.deliver_secret(con, u)},
+                  **ctx)
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
 def admin_users(request: Request, user=Depends(require_admin),
                 con: sqlite3.Connection = Depends(db_dep)):
-    users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
-    return render(request, "admin_users.html", user=user, active="users",
-                  users=users, temp_password=None, temp_user=None)
+    return _users_page(request, con, user)
 
 
 def _temp_password() -> str:
@@ -695,13 +955,10 @@ def add_user(request: Request, display_name: str = Form(...), email: str = Form(
                VALUES (?,?,?,?,1)""",
             (email.strip(), hash_password(pw), display_name.strip(), role))
     except sqlite3.IntegrityError:
-        users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
-        return render(request, "admin_users.html", user=user, active="users", users=users,
-                      temp_password=None, temp_user=None,
-                      flash=f"{email} already exists.", flash_kind="err")
-    users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
-    return render(request, "admin_users.html", user=user, active="users",
-                  users=users, temp_password=pw, temp_user=display_name)
+        return _users_page(request, con, user,
+                           flash=f"{email} already exists.", flash_kind="err")
+    return _users_page(request, con, user,
+                       temp_password=pw, temp_user=display_name)
 
 
 @app.post("/admin/users/{uid}/role")
@@ -767,6 +1024,9 @@ def impersonate_stop(request: Request, con: sqlite3.Connection = Depends(db_dep)
 @app.post("/admin/users/{uid}/reset", response_class=HTMLResponse)
 def reset_password(uid: int, request: Request, user=Depends(require_admin),
                    con: sqlite3.Connection = Depends(db_dep)):
+    """Temp password read out loud. The fallback, kept because it is the only
+    path that works for someone with no private channel - or when Slack is the
+    thing that is broken."""
     target = con.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
     if target is None:
         raise HTTPException(404)
@@ -774,9 +1034,36 @@ def reset_password(uid: int, request: Request, user=Depends(require_admin),
     con.execute("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
                 (hash_password(pw), uid))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
-    users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
-    return render(request, "admin_users.html", user=user, active="users",
-                  users=users, temp_password=pw, temp_user=target["display_name"])
+    return _users_page(request, con, user,
+                       temp_password=pw, temp_user=target["display_name"])
+
+
+@app.post("/admin/users/{uid}/reset-link", response_class=HTMLResponse)
+def send_reset_link(uid: int, request: Request, user=Depends(require_admin),
+                    con: sqlite3.Connection = Depends(db_dep)):
+    """DM the user a reset link instead of minting a password to read out.
+
+    Unlike the temp-password path this does NOT change the password or drop
+    sessions: nothing has happened yet, and invalidating a working password on
+    the strength of a message that may not arrive would be a lockout, not a
+    reset. The user's own click is what changes anything."""
+    target = con.execute("SELECT * FROM users WHERE id = ? AND is_active = 1",
+                         (uid,)).fetchone()
+    if target is None:
+        raise HTTPException(404)
+    # Synchronous, unlike /forgot: this route is behind require_admin, so it is
+    # nobody's enumeration oracle, and the admin needs to be told whether it
+    # actually went out.
+    ok, detail = _send_reset_link(con, target)
+    if not ok:
+        return _users_page(
+            request, con, user, flash_kind="err",
+            flash=f"{target['display_name']} {detail}. Use Reset password "
+                  "instead, or check Admin > Setup & status.")
+    return _users_page(
+        request, con, user, flash_kind="ok",
+        flash=f"Reset link sent to {target['display_name']} over "
+              f"{channels.LABELS[detail]}. It expires in {RESET_LINK_HOURS} hours.")
 
 
 # ---------------- API tokens

@@ -63,6 +63,14 @@ both:
 - **Quarterly targets with a ramp**: baseline for weeks 1-6, stretch for weeks 7+.
 - **Roles**: admin / editor / viewer, admin-managed accounts with one-time temp
   passwords, forced change on first sign-in.
+- **Passkeys**: sign in with Touch ID, Windows Hello, or a phone instead of a
+  password. Added per device from Account, and additive - the password stays as
+  the way back in when a device is lost.
+- **Self-serve password reset** without an email server: "Forgot password"
+  messages a two-hour link over the same private channel the check-in nudges
+  use (Slack DM, Telegram, SMS/WhatsApp). Never over Teams or Google Chat -
+  those post to a shared space, where a reset link is a takeover for whoever
+  clicks first.
 - **Slack alerts** behind a master toggle (ships OFF): stale sweep Wed 8am,
   red-escalation sweep Tue 8am, channel post + DM to the metric's owner.
 - **Ask it in Slack**: a remote MCP server at `/mcp` lets Claude read the board
@@ -119,6 +127,32 @@ sudo certbot --nginx -d scorecard.example.com
 The database lives in the `scorecard-data` Docker volume. Backup = copy one
 SQLite file. Moving servers = move the volume and the gitignored local files.
 
+## TV appliance (Raspberry Pi)
+
+Any browser pointed at `/tv` works as a display - the route resolves the display
+token server-side, so the screen never logs in and stores no credential. (It is
+also unauthenticated: anyone who can reach the host can open it. Restrict it at
+the proxy if that matters to you.)
+
+For a dedicated always-on screen, `deploy/kiosk/` is a complete build kit for a
+Raspberry Pi that boots straight into the board - no desktop, no keyboard, no
+login. It provisions from the FAT boot partition via cloud-init, so the two
+things an owner sets (Wi-Fi and which board to show) are text files editable on
+any laptop with an SD reader.
+
+```bash
+cp deploy/kiosk/*.example /Volumes/bootfs/     # then drop the .example suffixes
+```
+
+It also self-heals the failure that motivated it: an unclean power loss can
+erase NetworkManager's stored Wi-Fi credentials, and a headless screen that has
+forgotten its Wi-Fi password cannot be reached to be fixed. Credentials are kept
+on the boot partition and restored at every boot.
+
+See [`deploy/kiosk/README.md`](deploy/kiosk/README.md) for the hardware list,
+provisioning steps, the overlayfs tradeoff, security notes, and a field
+troubleshooting runbook.
+
 ## Using it
 
 - **Weekly rhythm**: owners enter last week's numbers by Monday EOD. Wednesday
@@ -129,7 +163,11 @@ SQLite file. Moving servers = move the volume and the gitignored local files.
   indicators). Archive keeps history; nothing is ever deleted.
 - **Admin > Targets**: baseline + stretch per metric per quarter. Editing a
   target rescores the whole quarter, deliberately: no renegotiating history.
-- **Admin > Users**: add people, change roles, reset passwords, deactivate.
+- **Admin > Users**: add people, change roles, deactivate, and two ways to deal
+  with a forgotten password. **Send reset link** messages the person a link and
+  changes nothing until they use it. **Reset password** mints a temp password
+  to read out and signs them out everywhere immediately - the fallback for
+  someone with no private channel, or for when Slack is the thing that broke.
 - **Admin > API tokens**: create, rotate, revoke. Rotate issues a new secret
   under the same name and scope and leaves the old one working for a grace
   period (default 7 days), so an integration can be moved over without a

@@ -37,6 +37,43 @@ Slack app manifest). Check `git grep` before every commit.
   db.get_setting) - readiness must not become a second source of truth about
   what is configured. Sweeps record every run in sweep_runs, including the
   early returns, so a skip has a reason attached.
+- Credentials in transit (password reset links) go ONLY over channels.PRIVATE
+  and ONLY to a public_base_url that is configured. Both halves are load-bearing:
+  channels.ready is true for Teams/Google Chat, but those are shared-space
+  webhooks, so a reset link there is an account takeover for whoever clicks
+  first - use channels.deliver_secret, never ready. And the base URL must come
+  from the setting, never request.base_url: the app binds the LAN directly, so
+  a forged Host header would put an attacker's domain in a real user's DM.
+  magic_links.purpose enforces the other direction - a check-in link is DM'd
+  weekly and lives 7 days, so consume_magic_link matches purpose rather than
+  assuming it, or the weakest token in the system becomes the strongest.
+- Routes that mint or remove a CREDENTIAL use auth.require_self, never
+  require_viewer. View-as resolves to the TARGET everywhere else by design, so
+  under require_viewer an admin viewing as someone could register a passkey
+  that belongs to them - the one thing an admin can leave behind that nothing
+  takes away, since it outlives the impersonation, survives the target's next
+  password reset (which keeps passkeys on purpose) and works after a demotion.
+  The reset link travels in a URL but is exchanged for a path-scoped HttpOnly
+  cookie on arrival (same move /checkin?t= makes), so it is not left in the
+  address bar, history, or every proxy log line for the page.
+- /forgot must stay constant-time with respect to whether the account exists:
+  the delivery call goes through BackgroundTasks, and the request itself does
+  one indexed SELECT on every path. Identical wording is not enough on its own
+  when one branch makes an HTTP call to Slack and the other does not - the
+  latency is the oracle. The admin Send-reset-link button is deliberately
+  synchronous: it is behind require_admin, so it is nobody's oracle, and the
+  admin needs to be told whether the message went out.
+- app/passkeys.py derives the WebAuthn RP ID and origin from the live REQUEST,
+  not from public_base_url: they must match what the browser sends, and a stale
+  setting would silently invalidate every registered passkey. This depends on
+  uvicorn's --proxy-headers (Dockerfile) for the https scheme behind Caddy.
+  Passkeys are additive forever - a lost device is recovered with the password,
+  so a reset keeps passkeys and no user is ever passkey-only.
+- Routes stay SYNC (`def`, not `async def`). db_dep yields a plain sqlite3
+  connection, which may only be used on the thread that opened it; an async
+  endpoint runs on the event loop while its dependency ran in the threadpool,
+  and every query raises. JSON bodies come in through Body(), not
+  `await request.json()`.
 - App config is key-value rows in the settings table (db.get_setting/set_setting),
   edited on Admin > Settings. Settings always live in the REAL db - demo mode
   swaps only the data db, so TV behavior toggles (demo, screensaver) keep
@@ -76,6 +113,16 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
   is icon_url per message, which needs chat:write.customize. alerts._post_message
   retries once without the icon on a scope error - never let the avatar become a
   way for a nudge to fail silently.
-- Deployment specifics: deploy/DEPLOY.local.md (gitignored). Same file covers
-  the office TV kiosk (a Pi running WPE/cog pointed at /tv - no desktop, no
-  login; /tv resolves the display token server-side).
+- Deployment specifics: deploy/DEPLOY.local.md (gitignored) - THIS office's
+  hosts, IPs and the one existing TV kiosk. Site-specific facts go there, never
+  in deploy/kiosk/.
+- deploy/kiosk/ is the PUBLIC, generic build kit for shippable Pi TV units
+  (WPE/cog on DRM pointed at /tv - no desktop, no login). Invariants:
+  user-data.example is the single authoritative definition of the appliance -
+  never document a unit tweak that is only applied by hand. Everything a
+  customer configures lives on the FAT boot partition (wifi-credentials,
+  scorecard-kiosk.conf), because it survives power loss and is editable without
+  SSH; ext4 does not, which is the whole reason the kit exists. cloud-init
+  re-applies nothing unless the instance-id changes in BOTH meta-data and
+  cmdline.txt - that cache is the top field-support trap. Validate the YAML
+  before imaging: a broken user-data means a unit that never gets on a network.

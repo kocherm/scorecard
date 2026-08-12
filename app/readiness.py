@@ -279,6 +279,49 @@ def _check_channel_coverage(con: sqlite3.Connection) -> Check:
                  *fix, actions=actions, items=items)
 
 
+def _check_reset_delivery(con: sqlite3.Connection) -> Check:
+    """Who can reset their own password without an admin in the loop.
+
+    Never BLOCKED: the admin temp-password path on Admin > Users always works,
+    so this is about how much of the job an admin still has to do by hand. It
+    counts every active user, not just metric owners - viewers sign in too -
+    and only PRIVATE channels count, because a reset link in a shared Teams or
+    Google Chat space is a link anyone on the team can use."""
+    fix = ("/admin/users", "Users")
+    people = con.execute(
+        "SELECT * FROM users WHERE is_active = 1 ORDER BY display_name").fetchall()
+    if not people:
+        return Check("reset_delivery", "Self-serve password reset", WARN,
+                     "No active users.", *fix)
+    if not (dbm.get_setting(con, "public_base_url") or "").strip():
+        return Check("reset_delivery", "Self-serve password reset", WARN,
+                     "No public base URL, so a reset link has no address to "
+                     "point at and none is sent. Everyone needs an admin.",
+                     f"{SETTINGS_URL}#nudges", "Set the public URL")
+    reachable = {u["id"] for u in people if channels.deliver_secret(con, u)}
+    items = tuple({"name": u["display_name"],
+                   "state": OK if u["id"] in reachable else WARN,
+                   "detail": (f"{channels.LABELS[channels.user_channel(u)]}"
+                              + ("" if u["id"] in reachable else
+                                 " - shared channel, cannot carry a reset link"
+                                 if channels.user_channel(u) not in channels.PRIVATE
+                                 else " - not configured"))}
+                  for u in people)
+    n = f"{len(people)} active {'user' if len(people) == 1 else 'users'}"
+    if not reachable:
+        return Check("reset_delivery", "Self-serve password reset", WARN,
+                     f"None of the {n} can be sent a reset link privately, so "
+                     "every forgotten password needs an admin to issue a temp "
+                     "one.", *fix, items=items)
+    if len(reachable) < len(people):
+        return Check("reset_delivery", "Self-serve password reset", WARN,
+                     f"{len(reachable)} of the {n} can reset their own password. "
+                     "The rest need an admin.", *fix, items=items)
+    return Check("reset_delivery", "Self-serve password reset", OK,
+                 f"All {n} can be sent a reset link over a private channel.",
+                 *fix, items=items)
+
+
 def _address_of(u: sqlite3.Row) -> Optional[str]:
     ch = channels.user_channel(u)
     if ch == "slack":
@@ -333,6 +376,7 @@ def local_checks(con: sqlite3.Connection, now: datetime) -> list[Check]:
         _check_public_base_url(con),
         _check_signing_secret(con),
         _check_channel_coverage(con),
+        _check_reset_delivery(con),
         _check_api_tokens(con, now),
     ]
 

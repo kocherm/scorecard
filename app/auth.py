@@ -120,8 +120,37 @@ require_editor = RequireRole("editor")
 require_admin = RequireRole("admin")
 
 
+def require_self(request: Request, user: sqlite3.Row = Depends(require_viewer)):
+    """The current user, refusing to act while an admin is viewing as them.
+
+    For routes that mint or remove a CREDENTIAL, which must always belong to
+    the account actually driving the browser. View-as deliberately resolves to
+    the target everywhere else - that is the whole point of the feature - but a
+    passkey registered under it would belong to the target, and would be the
+    one thing an admin can leave behind that nothing takes away: it outlives
+    the impersonation, survives the target's next password reset (which keeps
+    passkeys on purpose), and keeps working after the admin is demoted. The
+    banner promises anything saved is recorded as the admin; this is what makes
+    that true for credentials rather than merely claimed."""
+    if getattr(request.state, "impersonator", None) is not None:
+        raise HTTPException(status_code=403,
+                            detail="Exit view-as before changing passkeys")
+    return user
+
+
 # ---------------------------------------------------------------- magic links
 MAGIC_LINK_DAYS = 7
+RESET_LINK_HOURS = 2
+
+
+def _create_link(con: sqlite3.Connection, user_id: int, ttl: timedelta,
+                 purpose: str) -> str:
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + ttl).isoformat()
+    con.execute(
+        "INSERT INTO magic_links (token_hash, user_id, purpose, expires_at) "
+        "VALUES (?,?,?,?)", (_sha256(token), user_id, purpose, expires))
+    return token
 
 
 def create_magic_link(con: sqlite3.Connection, user_id: int,
@@ -129,26 +158,59 @@ def create_magic_link(con: sqlite3.Connection, user_id: int,
     """Pre-authenticated check-in link token (delivered over Slack DM).
     Multi-use until expiry: Slack's link crawler may GET the URL before the
     human does, so single-use tokens would be burned on arrival."""
-    token = secrets.token_urlsafe(32)
-    expires = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
-    con.execute(
-        "INSERT INTO magic_links (token_hash, user_id, expires_at) VALUES (?,?,?)",
-        (_sha256(token), user_id, expires))
-    return token
+    return _create_link(con, user_id, timedelta(days=days), "checkin")
 
 
-def consume_magic_link(con: sqlite3.Connection, token: str) -> Optional[int]:
-    """user_id for a valid unexpired link belonging to an active user, else None."""
+def consume_magic_link(con: sqlite3.Connection, token: str,
+                       purpose: str = "checkin") -> Optional[int]:
+    """user_id for a valid unexpired link of this purpose belonging to an active
+    user, else None. Purpose is matched, never assumed: a check-in link is DM'd
+    every week and lives for seven days, so letting one be redeemed for a
+    password change would make the weakest token in the system the strongest."""
     row = con.execute(
         """SELECT ml.user_id FROM magic_links ml
            JOIN users u ON u.id = ml.user_id
-           WHERE ml.token_hash = ? AND ml.expires_at > ? AND u.is_active = 1""",
-        (_sha256(token), datetime.now(timezone.utc).isoformat())).fetchone()
+           WHERE ml.token_hash = ? AND ml.purpose = ? AND ml.expires_at > ?
+             AND u.is_active = 1""",
+        (_sha256(token), purpose,
+         datetime.now(timezone.utc).isoformat())).fetchone()
     if row is None:
         return None
     con.execute("UPDATE magic_links SET last_used_at = datetime('now') "
                 "WHERE token_hash = ?", (_sha256(token),))
     return row["user_id"]
+
+
+# ------------------------------------------------------------ password resets
+def create_reset_link(con: sqlite3.Connection, user_id: int) -> str:
+    """Short-lived token authorising a password change, delivered over the
+    user's private message channel.
+
+    Multi-use within its window for the same reason check-in links are - Slack
+    unfurls the URL before the human clicks it - so the window does the work
+    instead: two hours, and any earlier outstanding reset for this user is
+    dropped, so a second 'forgot password' invalidates the first mail."""
+    con.execute("DELETE FROM magic_links WHERE user_id = ? AND purpose = 'reset'",
+                (user_id,))
+    return _create_link(con, user_id, timedelta(hours=RESET_LINK_HOURS), "reset")
+
+
+def complete_password_reset(con: sqlite3.Connection, user_id: int,
+                            new_password: str) -> None:
+    """Set the password and end every other way in.
+
+    A reset is what you do when you think someone else may have your password,
+    so it revokes the outstanding reset tokens AND every existing session for
+    the user - otherwise an attacker who is already signed in simply stays
+    signed in, and the reset achieves nothing. Passkeys are deliberately kept:
+    they are bound to hardware the attacker does not have, and dropping them
+    would lock the user out of the one credential a stolen password cannot
+    reach. The caller issues a fresh session afterwards."""
+    con.execute("UPDATE users SET password_hash = ?, must_change_password = 0 "
+                "WHERE id = ?", (hash_password(new_password), user_id))
+    con.execute("DELETE FROM magic_links WHERE user_id = ? AND purpose = 'reset'",
+                (user_id,))
+    con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
 
 def api_token_from_request(request: Request, con: sqlite3.Connection,
