@@ -20,6 +20,19 @@ Slack app manifest). Check `git grep` before every commit.
 - Week key = Monday date "YYYY-MM-DD" in the business timezone (America/Chicago).
   A week belongs to the month/quarter of its Monday. Never store derived state
   (colors, streaks, subtotals).
+- The IN-PROGRESS week scores accumulating counts on PACE (scoring.pace_fraction),
+  against what the FINISHED days owed - not the full target, and not the current
+  hour. Three of eight videos on a Thursday is on schedule, not red. Two rules
+  make this safe and both are load-bearing: only rollup='sum' + direction='up'
+  metrics pace, because a point-in-time value (MRR, a percentage) is already
+  whole every day it is read and scaling its target would call 5k of 25k MRR
+  "on pace"; and pace reads the DATE, never the clock, so a cell cannot change
+  colour while someone is watching the board and nobody is called behind at 5pm
+  for work due Saturday. Closed weeks are never paced. This is colour only -
+  alerts score last_closed_week exclusively (alerts.py), so pace can neither
+  fire nor suppress an escalation. MetricInfo.rollup defaults to None so any
+  caller that omits it keeps the old unpaced behaviour rather than silently
+  acquiring a new one.
 - Alert dedupe lives in alerts_sent; sweeps are idempotent, scheduled by APScheduler
   (stale: Wed 08:00, red ladder: Tue 08:00, business timezone).
 - app/mcp.py is a remote MCP server (JSON-RPC over Streamable HTTP at /mcp) so
@@ -94,6 +107,15 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
 ```
 
 ## Gotchas
+
+- A metric can be OWNED BY AN AUTOMATION writing through the JSON API, not by a
+  person typing. POST /entries is an upsert of an absolute value, so a daily
+  writer silently replaces anything entered by hand for that week - a number
+  someone corrects on Tuesday is gone by Wednesday morning, with no error and
+  nothing in the UI saying why. Before "fixing" a metric that keeps reverting,
+  check entry_audit for source='api' and find the writer. The upsert shape is
+  deliberate: it makes a re-run idempotent and lets a missed run self-heal, but
+  it means "last writer wins" and the automation usually writes last.
 
 - migrate/seed_data.local.json is required to seed; copy from seed_data.example.json.
 - Passwords/tokens are hashed in DB; temp passwords and API tokens print exactly once.
