@@ -96,6 +96,7 @@ def _metric_info(m: sqlite3.Row) -> sc.MetricInfo:
     return sc.MetricInfo(
         id=m["id"], metric_type=m["metric_type"], direction=m["direction"],
         start_week=date.fromisoformat(m["start_week"]), archived_week=archived_week,
+        rollup=m["rollup"],
     )
 
 

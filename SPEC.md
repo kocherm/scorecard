@@ -30,6 +30,19 @@ migrate/seed_data.example.json for the shape.
   stretch from week 7 through quarter end (including W14 when it exists).
 - A metric with no target shows its raw value neutrally, is excluded from red
   streaks, but staleness still applies: the data is due regardless.
+- The **in-progress week judges accumulating counts on pace**, not on the full
+  target. A week's work is due by the end of Saturday, so pace runs over six
+  days and each finished day owes a sixth of the target; the bands then apply
+  unchanged to that smaller number. Pace is measured against the close of
+  yesterday, never the current hour, so Monday owes nothing and a cell never
+  changes colour while someone is watching the board. Without this, every
+  "do N things this week" metric reads red from Monday morning, which is noise:
+  nobody is behind on Monday. Only accumulating metrics are paced
+  (rollup=sum, direction=up). A point-in-time value - MRR, churn risk, a
+  percentage - is already whole every day it is read, so scaling its target
+  would call 5k of 25k MRR "on pace" on Tuesday, which is simply false.
+  Closed weeks are never paced, and pace changes colour only: alerts score the
+  last closed week, so nothing here can fire or suppress an escalation.
 
 ## Staleness vs red
 
