@@ -237,7 +237,13 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
   `.ck-num:focus` (0,2,0) and left the field being typed in with no focus
   colour, and `.sidenav .nav-item span` matched `.nav-badge` and gave the count
   flex:1, ellipsising the label beside it. State rules go before focus rules,
-  and container rules exclude the components they should not reach.
+  and container rules exclude the components they should not reach. ORDER is
+  the third trap and the quietest: at EQUAL specificity the later rule wins, so
+  a media query placed beside the component it adjusts loses to any base rule
+  declared further down the file. `@media (max-width:760px) .status-body
+  {min-width:55%}` sat with the other layout rules and was silently beaten by
+  `.status-body {min-width:0}` 200 lines later - the block looked right, read
+  right, and did nothing. Responsive overrides go at the END of the stylesheet.
 - Slack two-way replies need Scorecard's OWN Slack app - never share a bot user
   with a chat agent that also lives in the workspace. Slack delivers message.im
   to exactly one consumer per app, and Socket Mode (what agent gateways use)
