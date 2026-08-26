@@ -22,7 +22,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from migrate import add_admin_scope, channel_rollup, slack_two_way
+from migrate import add_admin_scope, channel_rollup, oto_revisions, slack_two_way
 from migrate import passkeys as passkeys_migration
 
 from . import (alerts, channels, db as dbm, demo, entry_ops, grid as gridm,
@@ -96,6 +96,9 @@ async def lifespan(app: FastAPI):
         if channel_rollup.needs_migration(con):
             channel_rollup.migrate(con)
             log.info("Migrated sweep_runs.kind to allow the summary sweep")
+        if oto_revisions.needs_migration(con):
+            oto_revisions.migrate(con)
+            log.info("Migrated one_three_ones to allow revisions")
         # magic_links.purpose + users.webauthn_handle for DBs that predate
         # password-reset links and passkeys. init_db above already made the two
         # new tables (they are IF NOT EXISTS); columns need this.
@@ -879,11 +882,24 @@ def one_three_one_page(metric_id: int, week: str, request: Request,
     existing = con.execute(
         """SELECT o.*, u.display_name AS author FROM one_three_ones o
            JOIN users u ON u.id = o.created_by
-           WHERE o.metric_id = ? AND o.week_start = ?""",
+           WHERE o.metric_id = ? AND o.week_start = ?
+             AND o.superseded_at IS NULL""",
         (metric_id, week)).fetchone()
+    superseded = con.execute(
+        """SELECT o.*, u.display_name AS author FROM one_three_ones o
+           JOIN users u ON u.id = o.created_by
+           WHERE o.metric_id = ? AND o.week_start = ?
+             AND o.superseded_at IS NOT NULL
+           ORDER BY o.id DESC""", (metric_id, week)).fetchall()
+    # The evidence, above the form. Whoever files this has to reconstruct the
+    # metric's last two months from memory otherwise, in another tab.
+    mvm = gridm.build_metric(con, metric_id, datetime.now(timezone.utc))
     return render(request, "onethreeone.html", user=user, active="grid",
                   metric=m, dri_name=dri["display_name"] if dri else None,
-                  week=week, week_date=w, existing=existing,
+                  week=week, week_date=w, existing=existing, m=mvm,
+                  superseded=[dict(r, options=json.loads(r["options_json"]))
+                              for r in (dict(x) for x in superseded)],
+                  revise=bool(request.query_params.get("revise")),
                   existing_options=json.loads(existing["options_json"]) if existing else [])
 
 
@@ -896,13 +912,20 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
                        con: sqlite3.Connection = Depends(data_db_dep)):
     _metric_or_404(con, metric_id)
     wk.parse_week(week)
+    # Supersede rather than overwrite, and never silently drop the write: the
+    # old INSERT OR IGNORE discarded a second filing without a word, which is
+    # the one place in this app where a write vanished without saying so.
     con.execute(
-        """INSERT OR IGNORE INTO one_three_ones
+        """UPDATE one_three_ones SET superseded_at = datetime('now')
+           WHERE metric_id = ? AND week_start = ? AND superseded_at IS NULL""",
+        (metric_id, week))
+    con.execute(
+        """INSERT INTO one_three_ones
            (metric_id, week_start, problem, options_json, recommendation, created_by)
            VALUES (?,?,?,?,?,?)""",
         (metric_id, week, problem, json.dumps([option1, option2, option3]),
          recommendation, _data_actor_id(con, _real_actor(request, user))))
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/m/{metric_id}", status_code=303)
 
 
 # ---------------------------------------------------------------- TV display
@@ -1567,11 +1590,32 @@ def _audit_value(mtype: Optional[str], unit: Optional[str],
 
 
 def _audit_items(con: sqlite3.Connection, metric_id: Optional[int] = None,
-                 limit: int = 200) -> list[dict]:
+                 limit: int = 200, *, who: Optional[int] = None,
+                 source: str = "", late_only: bool = False) -> list[dict]:
     """Audit rows, formatted once. The global Activity page and a single
     metric's own history are the same list with a different WHERE - a second
     formatter here is how the two would start disagreeing about what "LATE"
-    means."""
+    means.
+
+    Every question anyone brings to this page is a filter: did the API
+    overwrite someone's number, what changed after the deadline, what has this
+    metric done. LATE is the one that cannot be a WHERE - it compares each row
+    against its own week's Wednesday-8am deadline, which SQLite has no cheap
+    way to compute - so it is applied after the fetch, over a wider window, and
+    the page says when that window was the limit."""
+    where, args = [], []
+    if metric_id is not None:
+        where.append("a.metric_id = ?")
+        args.append(metric_id)
+    if who is not None:
+        where.append("a.actor_user_id = ?")
+        args.append(who)
+    if source:
+        where.append("a.source = ?")
+        args.append(source)
+    # Scanning deeper only when the late filter needs it keeps the common
+    # case one indexed read.
+    fetch = limit * 5 if late_only else limit
     sql = """SELECT a.*, m.name AS metric_name, m.metric_type, m.unit,
                     u.display_name AS actor_name, t.name AS token_name
              FROM entry_audit a
@@ -1579,10 +1623,9 @@ def _audit_items(con: sqlite3.Connection, metric_id: Optional[int] = None,
              LEFT JOIN users u ON u.id = a.actor_user_id
              LEFT JOIN api_tokens t ON t.id = a.actor_token_id
              {where} ORDER BY a.id DESC LIMIT ?"""
-    args: tuple = ((metric_id, limit) if metric_id is not None else (limit,))
     rows = con.execute(
-        sql.format(where="WHERE a.metric_id = ?" if metric_id is not None else ""),
-        args).fetchall()
+        sql.format(where=("WHERE " + " AND ".join(where)) if where else ""),
+        tuple(args) + (fetch,)).fetchall()
     items = []
     for a in rows:
         week = date.fromisoformat(a["week_start"])
@@ -1599,17 +1642,34 @@ def _audit_items(con: sqlite3.Connection, metric_id: Optional[int] = None,
             "source": a["source"],
             "late": changed >= wk.stale_at(week),
         })
-    return items
+    if late_only:
+        items = [i for i in items if i["late"]]
+    return items[:limit]
 
 
 @app.get("/admin/activity", response_class=HTMLResponse)
-def admin_activity(request: Request, user=Depends(require_admin),
+def admin_activity(request: Request, who: str = "", metric: str = "",
+                   source: str = "", late: int = 0,
+                   user=Depends(require_admin),
                    con: sqlite3.Connection = Depends(db_dep)):
     """Every write, old value -> new value, who did it and when. Writes made
     after the week's Wednesday-8am staleness deadline carry a LATE chip, so
     quietly back-filling or 'correcting' history is always visible here."""
+    LIMIT = 200
+    items = _audit_items(con, int(metric) if metric.isdigit() else None,
+                         limit=LIMIT,
+                         who=int(who) if who.isdigit() else None,
+                         source=source if source in ("manual", "api", "slack") else "",
+                         late_only=bool(late))
     return render(request, "admin_activity.html", user=user, active="activity",
-                  items=_audit_items(con))
+                  items=items, limit=LIMIT,
+                  filtered=bool(who or metric or source or late),
+                  who=who, metric=metric, source=source, late=bool(late),
+                  people=con.execute(
+                      "SELECT id, display_name FROM users ORDER BY display_name"
+                  ).fetchall(),
+                  metrics=con.execute(
+                      "SELECT id, name FROM metrics ORDER BY name").fetchall())
 
 
 # ---------------- setup & status

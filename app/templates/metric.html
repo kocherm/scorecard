@@ -165,7 +165,7 @@
           {% else %}&ndash;{% endif %}
         </td>
         <td>{{ i.by }}</td>
-        <td><span class="chip {{ 'on' if i.source == 'manual' else 'editor' }}">{{ i.source }}</span></td>
+        <td><span class="chip src-{{ i.source }}">{{ i.source }}</span></td>
         <td>{% if i.late %}<span class="chip warn-late">LATE</span>{% endif %}</td>
       </tr>
       {% endfor %}

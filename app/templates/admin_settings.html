@@ -29,7 +29,62 @@
   <form method="post" action="/admin/settings/rotate-display-token">
     <button class="btn secondary sm" onclick="return confirm('Rotate? The TV will need the new URL.')">Rotate display token</button>
   </form>
+
+  {# The actual TV board, at a twentieth of the size. It is the real page on
+     its real 10-second poll, so every setting below - goal band, views,
+     window, screensaver, demo data - shows up here within ten seconds of
+     being saved. Configuring a display you cannot see was the gap. #}
+  <div class="tvprev">
+    <div class="tvprev-bar">
+      <span class="tvprev-label">Live preview</span>
+      {% for key, label in view_labels %}
+      <button type="button" class="tvprev-view {{ 'on' if loop.first }}"
+              data-view="{{ key }}">{{ label }}</button>
+      {% endfor %}
+      <button type="button" class="tvprev-view" data-view="">Rotating</button>
+      <a class="tvprev-open" href="{{ base_url }}/display?token={{ display_token }}"
+         target="_blank" rel="noopener">Open &#8599;</a>
+    </div>
+    <div class="tvprev-stage">
+      {# pointer-events are off: this is a preview, not a second place to
+         drive the TV from, and the board carries its own links. #}
+      <iframe class="tvprev-frame" id="tvprev-frame" title="TV board preview"
+              aria-hidden="true" tabindex="-1" loading="lazy"
+              src="/display?token={{ display_token }}"></iframe>
+    </div>
+    <p class="note">The real board on its real poll &mdash; changes below appear here
+      within about ten seconds.</p>
+  </div>
 </div>
+
+<script>
+(function () {
+  var frame = document.getElementById("tvprev-frame");
+  if (!frame) return;
+  var stage = frame.parentElement;
+  var base = frame.getAttribute("src");
+
+  /* The board is rendered at TV width and scaled down, so the preview shows
+     the layout that will actually be on the wall rather than the board
+     reflowed to a 600px viewport - which is a layout nobody will ever see. */
+  function fit() {
+    stage.style.setProperty("--tvprev-scale", stage.clientWidth / 1920);
+  }
+  fit();
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(stage);
+  else window.addEventListener("resize", fit);
+  document.querySelectorAll(".tvprev-view").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll(".tvprev-view").forEach(function (o) {
+        o.classList.toggle("on", o === b);
+      });
+      /* No ?view= is what the TV itself sends, so "Rotating" previews the
+         rotation rather than pinning a view. */
+      frame.src = b.dataset.view ? base + "&view=" + b.dataset.view : base;
+    });
+  });
+})();
+</script>
 <div class="panel" id="tv-views" style="max-width:640px">
   {% if saved == "tv-views" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>TV views</h2>

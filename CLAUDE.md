@@ -94,11 +94,37 @@ Slack app manifest). Check `git grep` before every commit.
   uvicorn's --proxy-headers (Dockerfile) for the https scheme behind Caddy.
   Passkeys are additive forever - a lost device is recovered with the password,
   so a reset keeps passkeys and no user is ever passkey-only.
-- Routes stay SYNC (`def`, not `async def`). db_dep yields a plain sqlite3
-  connection, which may only be used on the thread that opened it; an async
-  endpoint runs on the event loop while its dependency ran in the threadpool,
-  and every query raises. JSON bodies come in through Body(), not
-  `await request.json()`.
+- Routes stay SYNC (`def`, not `async def`). An async endpoint runs on the
+  event loop while its dependency ran in the threadpool, and every query
+  raises. JSON bodies come in through Body(), not `await request.json()`.
+  db.connect passes check_same_thread=False, and that is load-bearing rather
+  than lazy: a sync generator dependency does not get to choose its threads -
+  Starlette runs the `yield` and the teardown as two separate to_thread calls -
+  so under concurrency the per-request connection is CLOSED on a different
+  worker than opened it. That surfaced as /display returning 500 for 79 of 80
+  concurrent requests while a single request always worked, because one client
+  (the TV, polling alone) gets the same thread back every time. It is safe ONLY
+  because db_dep opens one connection per REQUEST and hands it to exactly one
+  request, so the threads touch it strictly one after another; never share a
+  connection between requests, and anything wanting one on its own schedule
+  (sweeps, migrations) calls connect() for itself. tests/test_concurrency.py
+  guards both halves.
+- A 1-3-1 SUPERSEDES rather than overwrites (migrate/oto_revisions): the old
+  row keeps its text and gains superseded_at, the way entry_audit keeps a
+  number you corrected. The route used INSERT OR IGNORE against a UNIQUE, so a
+  second filing vanished silently - the one place in this app where a write
+  disappeared without saying so. Uniqueness is now a PARTIAL index (one live
+  draft per metric-week) created by the migration, NOT by schema.sql:
+  schema.sql is replayed on every startup BEFORE the migrations, so an index
+  naming superseded_at fails against a not-yet-migrated table and takes the app
+  down on boot instead of migrating it. Any future constraint that depends on a
+  new column has the same trap.
+- Settings > Display embeds the real /display in an iframe, scaled. scale()
+  takes a NUMBER, so the ratio is measured in JS and set as --tvprev-scale;
+  calc(100cqw / 1920) is a length and silently does nothing. The frame is
+  rendered at 1920 and scaled DOWN on purpose - reflowing the board to a 600px
+  viewport would preview a layout nobody will ever see.
+
 - Admin > Targets shows LAST quarter's target, actual and hit rate on the row
   you are typing into (grid.build_target_rows), and saves the whole page at
   once. The actual is the weekly MEAN, not the quarter total: a weekly target

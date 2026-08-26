@@ -1307,7 +1307,112 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
 .met-noowner { color: var(--red-deep); font-weight: 500; }
 /* An automation owning a metric is a fact people used to discover by reading
    the audit table after a number kept reverting. */
-.chip.api { background: var(--amber-subtle); color: var(--amber-deep); margin-left: 6px; }
+.met .chip.api { background: var(--amber-subtle); color: var(--amber-deep); margin-left: 6px; }
 .met-actions { white-space: nowrap; }
 .met-actions form { display: inline; margin: 0; }
 .met-archived td { opacity: 0.5; border-top: 1px solid var(--cloud); }
+
+/* ---------- activity: an audit trail you can question ---------- */
+.act-panel { max-width: 1120px; }
+.act-filters {
+  display: flex; gap: 12px; align-items: end; flex-wrap: wrap;
+  padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--cloud);
+}
+.act-filters select { margin: 0; min-width: 150px; }
+.act-filters label { font-size: 11px; }
+.act-late {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--slate); padding-bottom: 7px;
+}
+.act-late input { width: auto; margin: 0; }
+.act-clear { font-size: 12px; color: var(--accent); text-decoration: none; padding-bottom: 8px; }
+.act-clear:hover { text-decoration: underline; }
+.act-wrap { overflow-x: auto; }
+.act-cap { margin-top: 12px; }
+/* Source is three distinct things, not "manual and other": an API write is the
+   one that silently replaces a person's number, so it must not look like a
+   Slack reply, which is a person. */
+.chip.src-manual { background: var(--green-subtle); color: var(--green-deep); }
+.chip.src-slack  { background: var(--pearl); color: var(--ink-light); }
+.chip.src-api    { background: var(--amber-subtle); color: var(--amber-deep); font-weight: 600; }
+
+/* ---------- 1-3-1: the evidence, then the form ---------- */
+.oto-panel { max-width: 720px; }
+.oto-evidence { background: var(--ivory); }
+.oto-head { display: flex; align-items: center; gap: 12px; }
+.oto-head h2 { margin: 0; }
+.oto-head .btn { margin-left: auto; }
+.oto-facts {
+  display: grid; gap: 14px; margin: 12px 0 16px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+.oto-facts .k {
+  display: block; font-size: 9.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--silver); font-weight: 500;
+}
+.oto-facts .v {
+  display: block; font-size: 22px; font-weight: 600; color: var(--navy);
+  line-height: 1.2; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.oto-facts .v small { font-size: 13px; font-weight: 400; color: var(--mist); margin-left: 4px; }
+.oto-facts .v.red { color: var(--red-deep); }
+.oto-facts .v.yellow { color: var(--amber-deep); }
+.oto-facts .v.green { color: var(--green-deep); }
+.oto-facts .v.stale, .oto-facts .v.pending { color: var(--mist); }
+.oto-facts .s { display: block; font-size: 11px; color: var(--silver); }
+.oto-weeks { border-collapse: collapse; width: 100%; }
+.oto-weeks th {
+  font-size: 9.5px; font-weight: 500; color: var(--mist);
+  padding: 2px 4px; text-align: center; white-space: nowrap;
+}
+.oto-weeks th.now { color: var(--navy); font-weight: 600; }
+.oto-weeks td { padding: 3px 4px; text-align: center; }
+.oto-weeks td.tgt { font-size: 10.5px; color: var(--mist); }
+.oto-actions { margin-top: 16px; display: flex; gap: 10px; }
+.oto-old { border-top: 1px solid var(--cloud); padding: 10px 0; }
+.oto-old summary { cursor: pointer; font-size: 12.5px; color: var(--slate); }
+.oto-old summary:hover { color: var(--accent-hover); }
+.oto-old h3 {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--silver); margin: 12px 0 3px;
+}
+
+/* ---------- live TV preview on Settings > Display ----------
+   The real /display page, scaled. Configuring the television without being
+   able to see it was the gap; the board already polls every ten seconds, so
+   the preview costs nothing but a transform. */
+.tvprev { margin-top: 18px; }
+.tvprev-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.tvprev-label {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; margin-right: 4px;
+}
+.tvprev-view {
+  font-family: inherit; font-size: 11px; font-weight: 500; cursor: pointer;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--cloud); background: #fff; color: var(--slate);
+}
+.tvprev-view:hover { border-color: var(--slate); color: var(--ink); }
+.tvprev-view.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.tvprev-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tvprev-open { margin-left: auto; font-size: 11.5px; color: var(--accent); text-decoration: none; }
+.tvprev-open:hover { text-decoration: underline; }
+/* 16:9 stage; the frame is rendered at TV width and scaled down, so the board
+   lays out exactly as it will on the wall rather than reflowing to a small
+   viewport and previewing a layout nobody will ever see. */
+.tvprev-stage {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  border: 1px solid var(--cloud); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--navy-deep);
+}
+.tvprev-frame {
+  position: absolute; top: 0; left: 0;
+  width: 1920px; height: 1080px; border: 0;
+  transform-origin: top left;
+  /* scale() takes a NUMBER, so this cannot be derived from the container in
+     CSS - calc(100cqw / 1920) is a length and silently does nothing. The
+     script measures the stage and sets --tvprev-scale; 0.3 is the fallback
+     for the panel's default width if it never runs. */
+  transform: scale(var(--tvprev-scale, 0.3));
+  pointer-events: none;
+}

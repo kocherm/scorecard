@@ -2,32 +2,106 @@
 {% block title %}1-3-1{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div class="eyebrow">Red metric &middot; {{ week | qlabel }} ({{ week_date.strftime('%b %-d') }}){% if dri_name %} &middot; DRI: {{ dri_name }}{% endif %}</div>
+  <div class="eyebrow"><a href="/m/{{ metric['id'] }}">{{ metric['name'] }}</a>
+    &middot; red week &middot; {{ week | qlabel }} ({{ week_date.strftime('%b %-d') }})
+    {%- if dri_name %} &middot; {{ dri_name }}{% endif %}</div>
   <h1>1-3-1: {{ metric['name'] }}</h1>
-  <p class="page-sub">One problem, three options, one recommendation. Bring this to the weekly sync.</p>
+  <p class="page-sub">One problem, three options, one recommendation. Bring it to the
+    weekly sync.</p>
 </div>
-<div class="panel" style="max-width:640px">
-  {% if existing %}
+
+{# The evidence, above the form. Whoever writes this had to reconstruct the
+   metric's last two months from memory, in another tab. #}
+<div class="panel oto-panel oto-evidence">
+  <h2>What happened</h2>
+  <div class="oto-facts">
+    <div>
+      <span class="k">Week of {{ m.last_closed.strftime('%b %-d') }}</span>
+      <span class="v {{ m.latest.state if m.latest else '' }}">{{ m.latest.display if m.latest and m.latest.display else '&mdash;'|safe }}</span>
+      <span class="s">{% if m.latest and m.latest.target_display != '-' %}target {{ m.latest.target_display }}{% else %}no target{% endif %}</span>
+    </div>
+    <div>
+      <span class="k">Red streak</span>
+      <span class="v red">{{ m.red_streak }}</span>
+      <span class="s">consecutive week{{ '' if m.red_streak == 1 else 's' }}</span>
+    </div>
+    <div>
+      <span class="k">Weeks on target</span>
+      <span class="v">{{ m.hit_weeks }}<small>/ {{ m.scored_weeks }}</small></span>
+      <span class="s">this quarter</span>
+    </div>
+  </div>
+  <table class="oto-weeks">
+    <tr>
+      {% for p in m.points[-8:] %}
+      <th class="{{ 'now' if p.week == m.last_closed }}">{{ p.date_label }}</th>
+      {% endfor %}
+    </tr>
+    <tr>
+      {% for p in m.points[-8:] %}
+      <td><span class="vchip {{ p.state }}">{{ p.display or '&mdash;'|safe }}</span></td>
+      {% endfor %}
+    </tr>
+    <tr>
+      {% for p in m.points[-8:] %}
+      <td class="tgt">{{ p.target_display }}</td>
+      {% endfor %}
+    </tr>
+  </table>
+  <p class="note">Value above, target below. <a href="/m/{{ metric['id'] }}">Full history &rarr;</a></p>
+</div>
+
+{% if existing and not revise %}
+<div class="panel oto-panel">
+  <div class="oto-head">
     <h2>Filed by {{ existing['author'] }} on {{ existing['created_at'][:10] }}</h2>
-    <h3>Problem</h3><p>{{ existing['problem'] }}</p>
-    <h3>Options</h3>
-    <ol>{% for o in existing_options %}<li>{{ o }}</li>{% endfor %}</ol>
-    <h3>Recommendation</h3><p>{{ existing['recommendation'] }}</p>
-    <a class="btn secondary" href="/">Back to scorecard</a>
-  {% else %}
+    <a class="btn secondary sm" href="/131/{{ metric['id'] }}/{{ week }}?revise=1">Revise</a>
+  </div>
+  <h3>The one problem</h3><p>{{ existing['problem'] }}</p>
+  <h3>Three options</h3>
+  <ol>{% for o in existing_options %}<li>{{ o }}</li>{% endfor %}</ol>
+  <h3>One recommendation</h3><p>{{ existing['recommendation'] }}</p>
+  <a class="btn secondary" href="/">Back to the board</a>
+</div>
+{% else %}
+<div class="panel oto-panel">
+  {% if existing %}
+  <div class="flash warn">Revising the 1-3-1 filed by {{ existing['author'] }} on
+    {{ existing['created_at'][:10] }}. The current version is kept and marked
+    superseded &mdash; nothing is overwritten.</div>
+  {% endif %}
   <form method="post">
     <label>The one problem</label>
-    <textarea name="problem" required></textarea>
-    <label>Option 1</label><input type="text" name="option1" required>
-    <label>Option 2</label><input type="text" name="option2" required>
-    <label>Option 3</label><input type="text" name="option3" required>
+    <textarea name="problem" required>{{ existing['problem'] if existing else '' }}</textarea>
+    {% for i in [1, 2, 3] %}
+    <label>Option {{ i }}</label>
+    <input type="text" name="option{{ i }}" required
+           value="{{ existing_options[i - 1] if existing and existing_options|length >= i else '' }}">
+    {% endfor %}
     <label>Your one recommendation</label>
-    <textarea name="recommendation" required></textarea>
-    <div style="margin-top:16px; display:flex; gap:10px">
-      <button class="btn" type="submit">File 1-3-1</button>
-      <a class="btn secondary" href="/">Cancel</a>
+    <textarea name="recommendation" required>{{ existing['recommendation'] if existing else '' }}</textarea>
+    <div class="oto-actions">
+      <button class="btn" type="submit">{{ 'Save revision' if existing else 'File 1-3-1' }}</button>
+      <a class="btn secondary" href="{{ '/131/%s/%s'|format(metric['id'], week) if existing else '/' }}">Cancel</a>
     </div>
   </form>
-  {% endif %}
 </div>
+{% endif %}
+
+{% if superseded %}
+<div class="panel oto-panel">
+  <h2>Earlier versions</h2>
+  <p class="note">Kept, the way a corrected number is kept in the audit trail.</p>
+  {% for o in superseded %}
+  <details class="oto-old">
+    <summary>{{ o['author'] }} &middot; {{ o['created_at'][:10] }} &middot;
+      superseded {{ o['superseded_at'][:10] }}</summary>
+    <h3>Problem</h3><p>{{ o['problem'] }}</p>
+    <h3>Options</h3>
+    <ol>{% for opt in o['options'] %}<li>{{ opt }}</li>{% endfor %}</ol>
+    <h3>Recommendation</h3><p>{{ o['recommendation'] }}</p>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

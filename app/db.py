@@ -15,7 +15,22 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 def connect(path: str | None = None) -> sqlite3.Connection:
     p = path or DB_PATH
     Path(p).parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(p)
+    # check_same_thread=False because a sync generator dependency does not get
+    # to choose its threads: Starlette runs the `yield` and the teardown as two
+    # separate to_thread calls, so under any real concurrency the connection is
+    # CLOSED on a different worker than opened it and sqlite3 raises
+    # "SQLite objects created in a thread can only be used in that same
+    # thread" - from inside the teardown, where it surfaces as a bare 500 with
+    # the real request already half-served. With one client (the TV, polling
+    # alone) the pool hands back the same thread and it never shows; two
+    # clients at once and /display fails ~99% of the time.
+    #
+    # This is safe here and is not a licence to share connections: db_dep opens
+    # one per REQUEST and hands it to exactly one request, so the two threads
+    # touch it strictly one after the other, never at the same time. Anything
+    # that wants a connection on its own schedule - the sweeps, the migrations
+    # - still calls connect() and gets its own.
+    con = sqlite3.connect(p, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")

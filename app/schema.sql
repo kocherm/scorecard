@@ -134,7 +134,16 @@ CREATE TABLE IF NOT EXISTS one_three_ones (
     created_by     INTEGER NOT NULL REFERENCES users(id),
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     resolved_at    TEXT,
-    UNIQUE (metric_id, week_start)
+    -- A revision supersedes rather than overwrites, so the old text survives
+    -- the way a corrected number does in entry_audit. The uniqueness that
+    -- still matters - one LIVE draft per metric-week - is the partial index
+    -- below, which a plain UNIQUE could not express.
+    superseded_at  TEXT
+    -- The uniqueness that still matters - one LIVE draft per metric-week - is
+    -- a partial index, and it is created by migrate.oto_revisions rather than
+    -- here. schema.sql is replayed on EVERY startup, before the migrations, so
+    -- an index naming superseded_at would fail against a not-yet-migrated
+    -- table and take the whole app down on boot.
 );
 
 CREATE TABLE IF NOT EXISTS alerts_sent (

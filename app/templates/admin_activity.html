@@ -4,17 +4,58 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>Activity</h1>
-  <p class="page-sub">Every write, newest first. Last 200.</p>
+  <p class="page-sub">Every write, newest first.</p>
 </div>
-<div class="panel">
+
+<div class="panel act-panel">
+  {# Every question people bring here is a filter: did the automation overwrite
+     someone's number, what changed after the deadline, what has this metric
+     done. It was an undifferentiated log of 200 rows. #}
+  <form method="get" class="act-filters">
+    <div>
+      <label for="f-who">Person</label>
+      <select name="who" id="f-who">
+        <option value="">anyone</option>
+        {% for p in people %}
+        <option value="{{ p['id'] }}" {% if who == p['id']|string %}selected{% endif %}>{{ p['display_name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="f-metric">Metric</label>
+      <select name="metric" id="f-metric">
+        <option value="">any metric</option>
+        {% for m in metrics %}
+        <option value="{{ m['id'] }}" {% if metric == m['id']|string %}selected{% endif %}>{{ m['name'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="f-source">Written by</label>
+      <select name="source" id="f-source">
+        <option value="">anything</option>
+        {% for key, label in [('manual', 'a person'), ('api', 'the API'), ('slack', 'Slack')] %}
+        <option value="{{ key }}" {% if source == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="act-late">
+      <input type="checkbox" name="late" value="1" {% if late %}checked{% endif %}>
+      After the deadline only
+    </label>
+    <button class="btn secondary sm" type="submit">Filter</button>
+    {% if filtered %}<a class="act-clear" href="/admin/activity">Clear</a>{% endif %}
+  </form>
+
   {% if not items %}
-  <p class="note">No entries have been written yet.</p>
+  <p class="note">{% if filtered %}Nothing matches those filters.{% else %}No entries have been written yet.{% endif %}</p>
   {% else %}
+  <div class="act-wrap">
   <table class="list">
     <tr><th>When</th><th>Metric</th><th>Week</th><th>Change</th>
-        <th title="Edits made while viewing as someone else are attributed to the real admin">By</th>
-        <th>Via</th>
-        <th title="Written after that week's Wednesday 8am staleness deadline">Late?</th></tr>
+      <th title="Edits made while viewing as someone else are attributed to the real admin">By</th>
+      <th>Via</th>
+      <th title="Written after that week's Wednesday 8am staleness deadline">Late?</th></tr>
     {% for i in items %}
     <tr>
       <td style="white-space:nowrap">{{ i.when }}</td>
@@ -27,11 +68,17 @@
         {% else %}&ndash;{% endif %}
       </td>
       <td>{{ i.by }}</td>
-      <td><span class="chip {{ 'on' if i.source == 'manual' else 'editor' }}">{{ i.source }}</span></td>
+      {# The two rows anyone is ever hunting for should not be the same grey as
+         everything else. #}
+      <td><span class="chip src-{{ i.source }}">{{ i.source }}</span></td>
       <td>{% if i.late %}<span class="chip warn-late">LATE</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>
+  </div>
+  {% if items|length >= limit %}
+  <p class="note act-cap">Showing the newest {{ limit }}. Narrow the filters to see further back.</p>
+  {% endif %}
   {% endif %}
 </div>
 {% endblock %}
