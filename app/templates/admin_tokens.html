@@ -64,7 +64,10 @@
     {% endif %}
     {% endfor %}
   </table>
-  <h3>Claude connector (MCP)</h3>
+  {# Setup instructions are read once and then are permanent noise on a page
+     whose job is listing tokens. #}
+  <details class="tok-help">
+    <summary>How to connect Claude (MCP)</summary>
   <p class="note">Claude reads the board through a read-only MCP server at
     <span class="mono">{{ mcp_base }}/mcp</span> - three tools:
     <span class="mono">get_scorecard</span>,
@@ -85,6 +88,8 @@
     <strong>Last used</strong> below is how you confirm Claude connected.</p>
   <p class="note">The URL carries the token, so it lands in the reverse proxy's
     access log. Keep it read-scoped, and rotate if the URL leaks.</p>
+
+  </details>
 
   <h3>New token</h3>
   <form method="post" action="/admin/tokens" style="display:flex; gap:10px; align-items:end">

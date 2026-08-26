@@ -4,14 +4,17 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>Activity</h1>
-  <p class="page-sub">Every write to the scorecard, newest first (last 200). Retroactive edits and late back-fills are part of the workflow &mdash; but they are never invisible: changes made after a week's Wednesday-8am staleness deadline carry a LATE chip, and edits made while viewing as someone else are attributed to the real admin.</p>
+  <p class="page-sub">Every write, newest first. Last 200.</p>
 </div>
 <div class="panel">
   {% if not items %}
   <p class="note">No entries have been written yet.</p>
   {% else %}
   <table class="list">
-    <tr><th>When</th><th>Metric</th><th>Week</th><th>Change</th><th>By</th><th>Via</th><th></th></tr>
+    <tr><th>When</th><th>Metric</th><th>Week</th><th>Change</th>
+        <th title="Edits made while viewing as someone else are attributed to the real admin">By</th>
+        <th>Via</th>
+        <th title="Written after that week's Wednesday 8am staleness deadline">Late?</th></tr>
     {% for i in items %}
     <tr>
       <td style="white-space:nowrap">{{ i.when }}</td>

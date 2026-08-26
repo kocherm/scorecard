@@ -61,7 +61,8 @@ def test_login_lands_on_checkin_when_numbers_are_missing(env):
     assert "My numbers" in r.text
     assert "Eddie Calls" in r.text and "Eddie Client" in r.text
     assert "Boss Metric" not in r.text          # only own metrics
-    assert "due now" in r.text                  # missing emphasis
+    assert "is-missing" in r.text               # missing emphasis
+    assert "0</b> of 2 entered" in r.text       # progress counter
 
 
 def test_save_due_and_status_then_login_goes_home(env):
@@ -115,22 +116,93 @@ def test_nav_badge_counts_missing(env):
     assert "nav-badge" not in client.get("/").text
 
 
-def test_earlier_weeks_are_listed_and_catchup_saves_with_audit(env):
+def test_backfill_lives_on_the_catch_up_page_not_the_weekly_one(env):
+    """Earlier weeks are a separate room: a two-month-old gap must not reopen
+    on the weekly page every Monday, which is what made it unusable."""
     client = env
     login(client)
-    r = client.get("/checkin")
-    assert "Earlier weeks" in r.text and "no data" in r.text
-
     gap = (wk.parse_week(due_week()) - timedelta(days=14)).isoformat()
-    r = client.post(f"/checkin/1/{gap}", data={"value": "7"})
-    assert r.status_code == 200
+
+    weekly = client.get("/checkin").text
+    assert gap not in weekly                    # not offered on the weekly page
+    assert "catch up" in weekly                 # but the way there is
+
+    cu = client.get("/checkin/catch-up").text
+    assert f"v:1:{gap}" in cu and "Eddie Calls" in cu
+    assert "Boss Metric" not in cu              # still DRI-scoped
+
+
+def test_catchup_saves_changed_cells_with_audit(env):
+    client = env
+    login(client)
+    gap = (wk.parse_week(due_week()) - timedelta(days=14)).isoformat()
+    older = (wk.parse_week(due_week()) - timedelta(days=21)).isoformat()
+
+    r = client.post("/checkin/catch-up", data={
+        f"v:1:{gap}": "7", f"o:1:{gap}": "",
+        f"v:1:{older}": "", f"o:1:{older}": "",      # untouched blank
+    }, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/checkin?saved=1"
+
     with dbm.get_db() as con:
         e = con.execute("SELECT * FROM entries WHERE metric_id=1 AND week_start=?",
                         (gap,)).fetchone()
         a = con.execute("SELECT * FROM entry_audit WHERE metric_id=1 AND week_start=?",
                         (gap,)).fetchone()
+        untouched = con.execute(
+            "SELECT COUNT(*) c FROM entry_audit WHERE week_start=?", (older,)
+        ).fetchone()["c"]
     assert e["value_numeric"] == 7.0
-    assert a["old_numeric"] is None and a["new_numeric"] == 7.0  # first entry
+    assert a["old_numeric"] is None and a["new_numeric"] == 7.0   # first entry
+    assert untouched == 0        # unchanged field wrote nothing, audited nothing
+
+
+def test_catchup_skips_unchanged_values_and_rejects_other_peoples_metrics(env):
+    client = env
+    login(client)
+    gap = (wk.parse_week(due_week()) - timedelta(days=14)).isoformat()
+    client.post("/checkin/catch-up", data={f"v:1:{gap}": "7", f"o:1:{gap}": ""})
+
+    # Re-submitting the same number is a no-op: no second audit row.
+    client.post("/checkin/catch-up", data={f"v:1:{gap}": "7", f"o:1:{gap}": "7"})
+    with dbm.get_db() as con:
+        assert con.execute(
+            "SELECT COUNT(*) c FROM entry_audit WHERE metric_id=1 AND week_start=?",
+            (gap,)).fetchone()["c"] == 1
+
+    # Metric 3 belongs to the boss; the field name is not authorisation.
+    r = client.post("/checkin/catch-up",
+                    data={f"v:3:{gap}": "9", f"o:3:{gap}": ""})
+    assert r.status_code == 403
+    with dbm.get_db() as con:
+        assert con.execute("SELECT COUNT(*) c FROM entries WHERE metric_id=3")\
+                  .fetchone()["c"] == 0
+
+
+def test_current_week_is_a_tab_not_a_second_field_on_every_row(env):
+    client = env
+    login(client)
+    due, cur = due_week(), cur_week()
+
+    weekly = client.get("/checkin").text
+    assert f'/checkin/1/{due}' in weekly and f'/checkin/1/{cur}' not in weekly
+
+    early = client.get(f"/checkin?week={cur}").text
+    assert f'/checkin/1/{cur}' in early and f'/checkin/1/{due}' not in early
+
+    # An unknown week falls back to the due week rather than 404ing.
+    fallback = client.get("/checkin?week=not-a-week").text
+    assert f'/checkin/1/{due}' in fallback
+
+
+def test_saving_swaps_the_row_and_the_counter_together(env):
+    client = env
+    login(client)
+    r = client.post(f"/checkin/1/{due_week()}", data={"value": "12"})
+    assert r.status_code == 200
+    assert 'id="ck-1"' in r.text                       # the row
+    assert 'hx-swap-oob="true"' in r.text               # the counter, out of band
+    assert "1</b> of 2 entered" in r.text
 
 
 def test_correction_keeps_old_value_in_the_audit_trail(env):

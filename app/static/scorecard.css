@@ -63,28 +63,75 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- app chrome: left icon rail ---------- */
+/* ---------- app chrome: labelled left nav ----------
+   Three top-level destinations, grouped by cadence. The seven admin screens
+   live one level down, in .subnav, so the rail stops being a route table. */
 .sidenav {
-  position: fixed; left: 0; top: 0; bottom: 0; width: 60px; z-index: 40;
+  position: fixed; left: 0; top: 0; bottom: 0; width: 196px; z-index: 40;
   background: var(--navy); display: flex; flex-direction: column;
-  align-items: center; padding: 12px 0 14px; gap: 4px;
+  padding: 14px 10px 14px; gap: 2px;
 }
-.sidenav .logo { display: block; margin-bottom: 14px; }
-.sidenav .logo img { width: 36px; height: 36px; display: block; border-radius: var(--radius-md); }
-.sidenav nav { display: flex; flex-direction: column; gap: 4px; }
-.sidenav a, .sidenav button {
-  width: 42px; height: 42px; display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.6); border-radius: var(--radius-md);
-  background: none; border: none; cursor: pointer; text-decoration: none;
+.sidenav .logo {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 6px; margin-bottom: 18px; text-decoration: none;
+}
+.sidenav .logo img { width: 32px; height: 32px; display: block; border-radius: var(--radius-md); }
+.sidenav .logo span {
+  color: #fff; font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+}
+.sidenav nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-group {
+  font-size: 9.5px; letter-spacing: 0.11em; text-transform: uppercase;
+  color: rgba(255,255,255,0.38); font-weight: 500;
+  padding: 14px 8px 5px;
+}
+.nav-group:first-child { padding-top: 2px; }
+.sidenav .nav-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 8px 8px; border-radius: var(--radius-md);
+  color: rgba(255,255,255,0.66); text-decoration: none;
+  font-family: inherit; font-size: 13px; font-weight: 500; text-align: left;
+  background: none; border: none; cursor: pointer;
   transition: color 160ms var(--ease), background 160ms var(--ease);
 }
-.sidenav a svg, .sidenav button svg { width: 19px; height: 19px; }
-.sidenav a:hover, .sidenav button:hover { color: #fff; background: rgba(255,255,255,0.08); }
-.sidenav a.active { color: #fff; background: rgba(255,255,255,0.07); box-shadow: inset 2px 0 0 var(--accent); }
+.sidenav .nav-item svg { width: 17px; height: 17px; flex: none; }
+/* :not(.nav-badge) is load-bearing - the badge is a span too, and this
+   selector out-ranks .nav-badge, so without it the count takes flex:1, grows
+   to 65px and ellipsises the label it is counting. */
+.sidenav .nav-item > span:not(.nav-badge) {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.sidenav .nav-item:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.sidenav .nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidenav .nav-item.active {
+  color: #fff; background: rgba(255,255,255,0.09);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .sidenav .grow { flex: 1; }
 .sidenav form { margin: 0; }
 
-.page { max-width: 1680px; margin: 0 auto; padding: 24px 24px 24px 84px; }
+/* Second level: the admin screens, on the admin screens. */
+.subnav {
+  display: flex; gap: 2px; flex-wrap: wrap;
+  margin: -4px 0 20px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--cloud);
+}
+.subnav a {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border-radius: var(--radius-md);
+  font-size: 12.5px; font-weight: 500; color: var(--slate); text-decoration: none;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+.subnav a:hover { background: var(--pearl); color: var(--ink); }
+.subnav a.on { background: var(--navy); color: #fff; }
+.subnav a i {
+  font-style: normal; font-size: 10px; font-weight: 600; line-height: 1;
+  padding: 2px 6px; border-radius: 999px;
+  background: var(--red); color: #fff;
+}
+
+.page { max-width: 1680px; margin: 0 auto; padding: 24px 28px 28px 220px; }
 
 /* floating mode-switch button */
 .fab {
@@ -104,27 +151,82 @@ body {
 }
 h1 { font-size: 24px; font-weight: 600; color: var(--navy); margin: 2px 0 4px; letter-spacing: -0.015em; }
 .page-sub { color: var(--slate); font-size: 14px; margin: 0; }
+/* Viewers get told once, in the register of a label - not a sentence of prose
+   reprinted above the board on every visit. */
+.ro-chip {
+  margin-left: 10px; vertical-align: 4px;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 500; color: var(--silver);
+  background: var(--pearl); border-radius: 999px; padding: 3px 9px;
+}
 
-/* ---------- summary strip ---------- */
-.summary { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: stretch; }
-.stat {
-  background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-subtle); padding: 12px 18px; min-width: 118px;
+/* ---------- the lede + act on this ----------
+   The board's first screen answers "what needs a decision today", before any
+   grid. Everything here is an arrangement of the same GridVM the table below
+   renders - never a second query path. */
+.lede { max-width: 78ch; margin: 2px 0 18px; }
+.lede-line {
+  margin: 0; font-size: 19px; line-height: 1.5;
+  color: var(--ink-light); letter-spacing: -0.012em; text-wrap: balance;
 }
-.stat .n { font-size: 26px; font-weight: 600; color: var(--navy); line-height: 1.1; letter-spacing: -0.015em; }
-.stat .l { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--silver); font-weight: 500; display: flex; align-items: center; gap: 6px; }
-.stat .l i { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
-.stat.green .n { color: var(--green-deep); }
-.stat.yellow .n { color: var(--amber-deep); }
-.stat.red .n { color: var(--red-deep); }
-.stat.stale .n { color: var(--silver); }
-.stat.attention {
-  flex: 1; min-width: 260px; display: flex; flex-direction: column; justify-content: center;
+.lede-line b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.lede-line b.on   { color: var(--green-deep); }
+.lede-line b.bad  { color: var(--red-deep); }
+.lede-line b.gone { color: var(--silver); }
+.lede-line b.wait { color: var(--amber-deep); }
+
+.acts { margin: 0 0 22px; }
+.acts-label {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; margin: 0 0 8px;
 }
-.stat.attention .t { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--silver); font-weight: 500; margin-bottom: 3px; }
-.stat.attention .names { font-size: 13px; color: var(--ink-light); }
-.stat.attention .names b { font-weight: 500; color: var(--red-deep); }
-.stat.attention .names span.gray { color: var(--silver); }
+.acts-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+.act {
+  background: #fff; border: 1px solid var(--cloud);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius-lg); padding: 12px 14px;
+  box-shadow: var(--shadow-subtle);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.act.stale { border-left-color: var(--stale); }
+.act-badge {
+  font-size: 9.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  font-weight: 600; color: var(--red-deep);
+}
+.act.stale .act-badge { color: var(--silver); }
+.act-name { font-size: 14px; font-weight: 600; color: var(--ink); margin: 0; }
+.act-num {
+  font-size: 22px; font-weight: 600; color: var(--navy);
+  line-height: 1.15; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.act-num small {
+  font-size: 12px; font-weight: 400; color: var(--silver);
+  margin-left: 6px; letter-spacing: 0;
+}
+.act-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 4px; padding-top: 8px;
+  border-top: 1px solid var(--ivory);
+}
+.act-who {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--slate); min-width: 0;
+}
+.act-who .av {
+  width: 20px; height: 20px; border-radius: 999px; flex: none;
+  background: var(--navy); color: #fff;
+  font-size: 9px; font-weight: 600; font-style: normal;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.act-step { font-size: 11.5px; color: var(--silver); text-align: right; }
+.act-do {
+  font-size: 12px; font-weight: 500; color: var(--accent);
+  text-decoration: none; white-space: nowrap;
+}
+.act-do:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* ---------- scorecard grid ---------- */
 .card {
@@ -156,6 +258,16 @@ th.wk .d { display: block; font-size: 9.5px; color: var(--mist); font-weight: 40
 th.wk.hot { color: var(--slate); }
 th.wk.hot .d { color: var(--mist); }
 th.wk.current { color: var(--navy); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+/* The last CLOSED week is the column a decision comes from - it was styled
+   almost identically to a week from two months ago. */
+th.wk.due {
+  color: var(--navy); font-weight: 600; background: var(--pearl);
+  box-shadow: inset 0 -2px 0 var(--navy);
+}
+th.wk.due .d { color: var(--slate); }
+td.cell.due-week { background: var(--pearl); }
+td.cell.due-week .vchip { font-size: 14px; }
+td.cell.due-week.editable:hover { background: var(--accent-muted); }
 th.metric-col, td.metric-cell {
   text-align: left; padding: 9px 16px; min-width: 250px; max-width: 320px;
   position: sticky; left: 0; background: #fff; z-index: 2;
@@ -163,13 +275,28 @@ th.metric-col, td.metric-cell {
 }
 th.metric-col { font-size: 10.5px; color: var(--silver); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 1px solid var(--pearl); }
 td.metric-cell .mrow { display: flex; align-items: center; gap: 8px; }
-td.metric-cell .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; background: var(--cloud); }
-td.metric-cell .dot.green { background: var(--green); }
-td.metric-cell .dot.yellow { background: var(--amber); }
-td.metric-cell .dot.red { background: var(--red); }
-td.metric-cell .dot.stale { background: var(--stale); }
+/* Shared state dot: the grid, the check-in list and the catch-up matrix all
+   say "how did this metric finish last week" the same way. Unscoped on
+   purpose - it was scoped to the grid, so every later surface that used the
+   markup rendered a zero-size, invisible span. */
+.dot { width: 9px; height: 9px; border-radius: 999px; flex: none;
+       display: inline-block; background: var(--cloud); }
+.dot.green { background: var(--green); }
+.dot.yellow { background: var(--amber); }
+.dot.red { background: var(--red); }
+.dot.stale { background: var(--stale); }
 td.metric-cell .mname { font-weight: 500; color: var(--ink); font-size: 14.5px; line-height: 1.3; }
-td.metric-cell .mdri { font-size: 11px; color: var(--silver); margin-left: 17px; }
+td.metric-cell .mdri {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--slate); margin: 3px 0 0 17px;
+}
+td.metric-cell .mdri .av {
+  width: 18px; height: 18px; border-radius: 999px; flex: none;
+  background: var(--navy); color: #fff;
+  font-size: 8.5px; font-weight: 600; font-style: normal; letter-spacing: 0.02em;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+td.metric-cell .mdri .unowned { color: var(--red-deep); font-weight: 500; }
 td.metric-cell .mrow.key .mname { font-weight: 600; color: var(--navy); }
 td.metric-cell .keymark { color: var(--accent); font-size: 12px; line-height: 1; }
 .badge-131 {
@@ -344,61 +471,238 @@ tr.token-prior td:first-child { padding-left: 24px; }
 .panel details summary:hover { color: var(--accent-hover); }
 .panel details[open] { padding-bottom: 12px; }
 
-/* ---- my numbers check-in ---- */
-.sidenav nav a { position: relative; }
+/* The count rides at the END of a labelled row now, not pinned to the corner
+   of an icon - it reads as part of the sentence "My numbers: 4". */
 .nav-badge {
-  position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px;
-  padding: 0 4px; border-radius: 999px; background: var(--accent);
-  color: #fff; font-size: 10px; font-weight: 700; line-height: 16px;
+  flex: none; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; background: var(--accent);
+  color: #fff; font-size: 10px; font-weight: 700; line-height: 18px;
   text-align: center;
 }
-.ck-list { display: grid; gap: 14px; max-width: 560px; }
-.ck-card {
+/* The weekly ritual: one row per metric, one column that matters. Density is
+   the point - eleven metrics have to be visible at once, or the page stops
+   being a list you finish and becomes a scroll you abandon. */
+.ck-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin: 8px 0 18px;
+  max-width: var(--ck-measure);
+}
+/* One measure for the header, the tabs and the sheet: the progress bar has to
+   sit over the list it is counting, not drift off toward the window edge. */
+.ck-head, .ck-weeks, .ck-sheet, .ck-note { --ck-measure: 820px; }
+.ck-weeks { max-width: var(--ck-measure); }
+.ck-head h1 { margin: 2px 0 0; }
+.ck-note { color: var(--slate); font-size: 13px; margin: 0 0 16px; max-width: 70ch; }
+
+.ck-progress { display: flex; align-items: center; gap: 12px; min-width: 220px; }
+.ck-count { font-size: 12px; color: var(--slate); white-space: nowrap; }
+.ck-count b {
+  font-size: 17px; font-weight: 600; color: var(--navy);
+  font-variant-numeric: tabular-nums; margin-right: 3px;
+}
+.ck-bar {
+  flex: 1; height: 5px; min-width: 90px; border-radius: 999px;
+  background: var(--pearl); overflow: hidden;
+}
+.ck-bar i {
+  display: block; height: 100%; border-radius: 999px; background: var(--green);
+  transition: width 220ms var(--ease);
+}
+
+/* week switcher */
+.ck-weeks { display: flex; gap: 4px; margin-bottom: 14px; }
+.ck-weeks a {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 7px 14px; border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  text-decoration: none; color: var(--slate); font-size: 13px; font-weight: 500;
+  transition: background 160ms var(--ease), color 160ms var(--ease);
+}
+.ck-weeks a span {
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500;
+}
+.ck-weeks a:hover { background: var(--ivory); color: var(--ink); }
+.ck-weeks a.on {
+  background: #fff; border-color: var(--cloud); color: var(--navy);
+  box-shadow: var(--shadow-subtle);
+}
+.ck-weeks a.on span { color: var(--accent); }
+
+.ck-sheet {
   background: #fff; border: 1px solid var(--cloud);
-  border-radius: var(--radius-lg, 12px); padding: 16px 18px;
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-subtle);
+  overflow: hidden; max-width: var(--ck-measure);
 }
-.ck-card.ck-due-missing { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-subtle); }
-.ck-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.ck-section { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--silver); }
-.ck-name { font-size: 16px; font-weight: 600; color: var(--ink); margin-top: 2px; }
-.ck-chip {
-  flex-shrink: 0; padding: 3px 12px; border-radius: 999px;
-  font-size: 12px; font-weight: 600;
+
+/* Column headings, so "last week" and the week being entered are said once at
+   the top instead of once per row - nine repetitions of the same label is the
+   noise this page was rebuilt to remove. */
+.ck-cols {
+  display: grid;
+  grid-template-columns: var(--ck-cols);
+  align-items: end; gap: 14px;
+  padding: 12px 18px 8px;
+  font-size: 9.5px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--mist); font-weight: 500;
+  border-bottom: 1px solid var(--cloud);
 }
-.ck-chip.green { background: var(--green-subtle); color: var(--green-deep); }
-.ck-chip.yellow { background: var(--amber-subtle); color: var(--amber-deep); }
-.ck-chip.red { background: var(--red-subtle); color: var(--red-deep); }
-.ck-chip.stale, .ck-chip.pending, .ck-chip.no-target { background: var(--pearl); color: var(--slate); }
-.ck-week { padding: 8px 0 2px; }
-.ck-week + .ck-week { border-top: 1px dashed var(--cloud); margin-top: 8px; }
-.ck-week label { display: block; font-size: 12px; color: var(--slate); margin-bottom: 6px; }
-.ck-week.missing label { color: var(--amber-deep); }
-.ck-current label { color: var(--silver); }
-.ck-form { display: flex; gap: 8px; align-items: center; }
-.ck-form input[type="number"] {
-  width: 130px; font-size: 17px; padding: 9px 12px;
-  border: 1px solid var(--mist); border-radius: var(--radius-md);
+.ck-cols .r { text-align: right; }
+.ck-cols .now { color: var(--accent); }
+.ck-group {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500;
+  padding: 14px 18px 6px;
 }
-.ck-status {
-  min-width: 52px; padding: 9px 0; border-radius: var(--radius-md);
-  border: 1.5px solid var(--mist); background: #fff; color: var(--slate);
-  font-size: 15px; font-weight: 700; cursor: pointer;
+.ck-group:first-child { padding-top: 12px; }
+
+.ck-row {
+  display: grid;
+  grid-template-columns: var(--ck-cols);
+  align-items: center; gap: 14px;
+  padding: 7px 18px;
+  border-top: 1px solid var(--ivory);
 }
-.ck-status.g.sel { background: var(--green); border-color: var(--green); color: #fff; }
-.ck-status.y.sel { background: var(--amber); border-color: var(--amber); color: #fff; }
-.ck-status.r.sel { background: var(--red); border-color: var(--red); color: #fff; }
-.ck-status:hover { border-color: var(--slate); }
-.ck-card details.ck-earlier { border-top: 1px dashed var(--cloud); margin-top: 8px; padding-top: 6px; }
-.ck-card details.ck-earlier summary {
-  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--slate); padding: 2px 0;
+.ck-sheet { --ck-cols: minmax(0, 1fr) 64px 84px 120px 22px; }
+.ck-row:hover { background: var(--warm-white); }
+.ck-row.is-missing { box-shadow: inset 3px 0 0 var(--amber); }
+.ck-row.is-missing:hover { background: var(--amber-subtle); }
+
+.ck-metric { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ck-nm {
+  font-size: 13.5px; font-weight: 500; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ck-card details.ck-earlier summary strong { color: var(--amber-deep); }
-.ck-card details.ck-earlier summary:hover { color: var(--accent-hover); }
-.ck-card details.ck-earlier[open] summary { margin-bottom: 4px; }
-@media (max-width: 600px) {
-  .ck-list { max-width: none; }
-  .ck-form input[type="number"] { width: 100%; }
-  .ck-status { flex: 1; }
+.ck-streak {
+  font-size: 10px; font-weight: 500; white-space: nowrap;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--red-subtle); color: var(--red-deep);
+}
+.ck-sparkline { height: 20px; gap: 2px; }
+.ck-sparkline i { width: 7px; }
+.ck-sparkline i.bar { width: 7px; }
+
+.ck-ctx {
+  text-align: right; font-variant-numeric: tabular-nums;
+  font-size: 12.5px; color: var(--slate);
+}
+.ck-ctx b { font-weight: 500; }
+
+.ck-num {
+  width: 100%; height: 32px; padding: 0 10px;
+  border: 1px solid var(--cloud); border-radius: var(--radius-sm);
+  background: #fff; color: var(--ink);
+  font-family: inherit; font-size: 14px; font-weight: 500;
+  text-align: right; font-variant-numeric: tabular-nums;
+  transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
+}
+.ck-num:hover { border-color: var(--mist); }
+.ck-row.is-missing .ck-num { border-color: var(--amber); }
+/* Focus has to out-rank the missing-row amber, or the one field you are
+   actually typing in is the one with no focus colour - .ck-row.is-missing
+   .ck-num is three classes deep and would win on specificity alone. */
+.ck-row .ck-num:focus, .ck-row.is-missing .ck-num:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.ck-entry { margin: 0; }
+.ck-na { color: var(--mist); font-size: 13px; display: block; text-align: right; }
+
+.ck-choice { display: flex; gap: 4px; }
+.ck-opt {
+  flex: 1; height: 32px; min-width: 0; padding: 0 6px;
+  border: 1px solid var(--cloud); border-radius: var(--radius-sm);
+  background: #fff; color: var(--slate);
+  font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.ck-opt:hover { border-color: var(--slate); }
+.ck-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ck-opt.g.sel { background: var(--green); border-color: var(--green); color: #fff; }
+.ck-opt.y.sel { background: var(--amber); border-color: var(--amber); color: #fff; }
+.ck-opt.r.sel { background: var(--red); border-color: var(--red); color: #fff; }
+
+.ck-mark { text-align: center; }
+.ck-tick { color: var(--green); font-size: 13px; }
+
+.ck-done {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; background: var(--green-subtle);
+  border-bottom: 1px solid var(--cloud);
+}
+.ck-done-mark {
+  width: 26px; height: 26px; flex: none; border-radius: 999px;
+  background: var(--green); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.ck-done b { display: block; font-size: 14px; color: var(--green-deep); font-weight: 600; }
+.ck-done span { font-size: 12px; color: var(--slate); }
+.ck-done .btn { margin-left: auto; flex: none; }
+
+.ck-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 11px 18px; border-top: 1px solid var(--cloud);
+  background: var(--ivory);
+}
+.ck-hint { font-size: 11.5px; color: var(--silver); }
+.ck-hint kbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px;
+  border: 1px solid var(--cloud); border-bottom-width: 2px;
+  border-radius: 3px; padding: 1px 5px; background: #fff; color: var(--slate);
+}
+.ck-gaps { font-size: 11.5px; color: var(--accent); text-decoration: none; font-weight: 500; }
+.ck-gaps:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ---- catch up: the backfill matrix, in a room of its own ---- */
+.cu-panel { padding-bottom: 0; width: max-content; max-width: 100%; }
+.cu-wrap { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
+.cu { border-collapse: collapse; font-size: 12px; }
+.cu th { text-align: center; padding: 6px 8px; border-bottom: 1px solid var(--cloud); }
+.cu th.cu-metric { text-align: left; }
+.cu-wk b {
+  display: block; font-size: 11px; font-weight: 500; color: var(--ink-light);
+  white-space: nowrap;
+}
+.cu-wk span {
+  font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--mist);
+}
+.cu td { padding: 5px 8px; border-bottom: 1px solid var(--ivory); }
+.cu td.cu-metric {
+  display: flex; align-items: baseline; gap: 8px;
+  min-width: 190px; max-width: 260px;
+}
+.cu-nm { font-size: 12.5px; font-weight: 500; }
+.cu-sec {
+  font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--mist); margin-left: auto; white-space: nowrap;
+}
+.cu-cell input, .cu-cell select {
+  width: 82px; height: 30px; padding: 0 8px; margin: 0;
+  border: 1px solid var(--cloud); border-radius: var(--radius-sm);
+  background: #fff; color: var(--ink);
+  font-family: inherit; font-size: 13px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cu-cell select { text-align: left; }
+.cu-cell.gap input, .cu-cell.gap select { border-color: var(--amber-subtle); background: var(--amber-subtle); }
+/* Same collision as the check-in list: the gap tint is declared last and at
+   equal specificity, so focus is stated after it and at a higher one. */
+.cu-cell input:focus, .cu-cell select:focus,
+.cu-cell.gap input:focus, .cu-cell.gap select:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.cu-na { display: block; text-align: center; color: var(--mist); }
+.cu-actions {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 0; border-top: 1px solid var(--cloud); margin-top: 4px;
+}
+.cu-count { margin-left: auto; }
+
+@media (max-width: 760px) {
+  .ck-row { grid-template-columns: minmax(0, 1fr) 116px 22px; gap: 10px; }
+  .ck-sparkline, .ck-ctx { display: none; }
+  .ck-weeks a { flex: 1; }
 }
 
 .viewas-bar {
@@ -694,3 +998,201 @@ dialog.about::backdrop { background: rgba(15,26,46,0.55); }
   background: #fff; border-radius: 0 0 var(--radius-lg) var(--radius-lg); line-height: 1.6; }
 .about-body a { color: var(--accent-hover); font-weight: 500; text-decoration: none; }
 .about-body a:hover { text-decoration: underline; }
+
+/* ---------- one metric, in full ----------
+   The address the product never had: "why is this red?" answered on one page
+   instead of assembled from the board, Activity, Targets and the 1-3-1. */
+.mx-facts {
+  display: grid; gap: 12px; margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  max-width: 1000px;
+}
+.mx-fact {
+  background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-subtle); padding: 13px 16px;
+}
+.mx-fact .k {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500;
+}
+.mx-fact .v {
+  font-size: 27px; font-weight: 600; color: var(--navy); line-height: 1.2;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin: 3px 0 1px;
+}
+.mx-fact .v.name { font-size: 18px; letter-spacing: -0.01em; }
+.mx-fact .v small { font-size: 15px; font-weight: 400; color: var(--mist); margin-left: 5px; }
+.mx-fact .v.green { color: var(--green-deep); }
+.mx-fact .v.yellow { color: var(--amber-deep); }
+.mx-fact .v.red { color: var(--red-deep); }
+.mx-fact .v.stale, .mx-fact .v.pending { color: var(--mist); }
+.mx-fact .s { font-size: 11.5px; color: var(--silver); }
+.mx-fact .s b.mx-red { color: var(--red-deep); font-weight: 600; }
+
+.mx-esc {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 16px; margin-bottom: 16px; max-width: 1000px;
+  background: var(--red-subtle); border: 1px solid var(--red);
+  border-radius: var(--radius-md); color: var(--red-deep); font-size: 13.5px;
+}
+.mx-esc .btn { margin-left: auto; }
+
+.mx-panel { max-width: 1000px; }
+.mx-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mx-head h2 { margin: 0; }
+.mx-qpick { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.mx-qpick select { width: 78px; margin: 0; }
+.mx-qpick input { width: 86px; margin: 0; }
+
+.mx-chart-wrap { margin: 16px 0 6px; }
+.mx-chart { width: 100%; height: 180px; display: block; overflow: visible; }
+.mx-bar { fill: var(--mist); }
+.mx-bar.green { fill: var(--green); }
+.mx-bar.yellow { fill: var(--amber); }
+.mx-bar.red { fill: var(--red); }
+.mx-bar.stale, .mx-bar.pending, .mx-bar.none { fill: var(--cloud); }
+.mx-tline { stroke: var(--navy); stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.45; }
+.mx-base { stroke: var(--cloud); stroke-width: 1; }
+.mx-axis {
+  display: grid; grid-template-columns: repeat(var(--n), 1fr);
+  border-top: 1px solid var(--cloud); padding-top: 6px;
+}
+.mx-axis span {
+  text-align: center; font-size: 9.5px; color: var(--mist); line-height: 1.35;
+}
+.mx-axis span b {
+  display: block; font-size: 10.5px; font-weight: 500; color: var(--slate);
+}
+.mx-axis span.now b { color: var(--accent); }
+
+.mx-wrap { overflow-x: auto; }
+.mx-weeks { width: 100%; border-collapse: collapse; margin-top: 16px; }
+.mx-weeks th {
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; text-align: left;
+  padding: 7px 10px; border-bottom: 1px solid var(--cloud);
+}
+.mx-weeks th.r, .mx-weeks td.r { text-align: right; }
+.mx-weeks td { padding: 7px 10px; border-bottom: 1px solid var(--ivory); font-size: 13px; }
+.mx-weeks tr.is-now { background: var(--warm-white); }
+.mx-tag {
+  font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--accent); font-weight: 500; margin-left: 6px;
+}
+.mx-edit { font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 500; }
+.mx-edit:hover { text-decoration: underline; }
+.mx-oto { border-top: 1px solid var(--cloud); padding: 10px 0; }
+.mx-oto summary { cursor: pointer; font-size: 13px; color: var(--ink-light); }
+.mx-oto h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+             color: var(--silver); margin: 12px 0 4px; }
+
+/* Metric names are the way in, everywhere they appear. */
+a.mname, a.ck-nm, .act-name a, .mx-weeks a { color: inherit; text-decoration: none; }
+a.mname:hover, a.ck-nm:hover, .act-name a:hover { color: var(--accent); }
+
+/* ---------- board filters ----------
+   The four questions people bring to the board, as one row of chips. */
+.gfilters { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.gf {
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  padding: 5px 13px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--cloud); background: #fff; color: var(--slate);
+  transition: background 160ms var(--ease), color 160ms var(--ease),
+              border-color 160ms var(--ease);
+}
+.gf:hover { border-color: var(--mist); color: var(--ink); }
+.gf:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gf.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.gf-count { font-size: 11.5px; color: var(--silver); margin-left: 4px; }
+
+/* Month totals, moved out of the timeline and into the summary group. */
+th.pin-group {
+  background: var(--ivory); color: var(--silver);
+  font-size: 10px; font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 8px 8px 2px; border-bottom: none; border-left: 1px solid var(--pearl);
+}
+th.subtotal.head {
+  font-size: 10px; font-weight: 500; color: var(--mist);
+  padding: 2px 8px 6px; background: var(--ivory);
+  border-bottom: 1px solid var(--pearl); white-space: nowrap;
+}
+th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
+
+/* ---------- targets, with the evidence on the row ----------
+   The most consequential admin action: it defines red/yellow/green for a
+   quarter. It used to be empty boxes with no context at all. */
+.tg-panel { max-width: 1080px; }
+.tg-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.tg-qpick { display: flex; gap: 8px; align-items: center; }
+.tg-qpick select { width: 78px; margin: 0; }
+.tg-qpick input { width: 88px; margin: 0; }
+.tg-wrap { overflow-x: auto; }
+.tg { width: 100%; border-collapse: collapse; }
+.tg th {
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; text-align: left;
+  padding: 8px 10px; border-bottom: 1px solid var(--cloud); white-space: nowrap;
+  vertical-align: bottom;
+}
+.tg th span {
+  display: block; font-size: 9px; letter-spacing: 0.04em;
+  text-transform: none; color: var(--mist); font-weight: 400;
+}
+.tg th.r, .tg td.r { text-align: right; }
+/* The evidence columns are quieter than the boxes they inform. */
+.tg th.ev, .tg td.ev { background: var(--ivory); }
+.tg td { padding: 7px 10px; border-bottom: 1px solid var(--ivory); font-size: 13px;
+         font-variant-numeric: tabular-nums; }
+.tg td.dim { color: var(--silver); }
+.tg-metric a { color: var(--ink); font-weight: 500; text-decoration: none; font-size: 13.5px; }
+.tg-metric a:hover { color: var(--accent); }
+.tg-sub { display: block; font-size: 11px; color: var(--silver); }
+.tg td .up { color: var(--green-deep); font-size: 11.5px; margin-left: 4px; }
+.tg td .down { color: var(--red-deep); font-size: 11.5px; margin-left: 4px; }
+.tg td input {
+  width: 96px; height: 30px; padding: 0 9px; margin: 0;
+  border: 1px solid var(--cloud); border-radius: var(--radius-sm);
+  background: #fff; color: var(--ink);
+  font-family: inherit; font-size: 13.5px; font-weight: 500;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.tg td input:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+.tg-quick { white-space: nowrap; }
+.tg-q {
+  font-family: inherit; font-size: 11px; font-weight: 500; cursor: pointer;
+  padding: 4px 9px; margin-left: 4px; border-radius: var(--radius-sm);
+  border: 1px solid var(--cloud); background: #fff; color: var(--slate);
+}
+.tg-q:hover { border-color: var(--slate); color: var(--ink); }
+.tg-q:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tg-actions {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding-top: 16px; margin-top: 4px; border-top: 1px solid var(--cloud);
+}
+
+/* Settings groups. Third-level nav, so it reads as quieter than .subnav. */
+.stabs { display: flex; gap: 2px; margin: 0 0 18px; border-bottom: 1px solid var(--cloud); }
+.stabs a {
+  padding: 8px 14px 9px; font-size: 13px; font-weight: 500;
+  color: var(--slate); text-decoration: none; border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 160ms var(--ease), border-color 160ms var(--ease);
+}
+.stabs a:hover { color: var(--ink); }
+.stabs a.on { color: var(--navy); border-bottom-color: var(--accent); }
+
+.tok-help { border-top: 1px solid var(--cloud); margin-top: 18px; padding-top: 12px; }
+.tok-help summary {
+  cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-light);
+}
+.tok-help summary:hover { color: var(--accent-hover); }
+.tok-help[open] summary { margin-bottom: 8px; }
+
+/* "Why does this exist" text: available, not printed on every visit. */
+.panel details.why { border: none; padding: 4px 0 0; margin: 0; }
+.panel details.why:last-of-type { border-bottom: none; margin-bottom: 0; }
+.panel details.why summary {
+  font-size: 12px; font-weight: 500; color: var(--silver); cursor: pointer;
+}
+.panel details.why summary:hover { color: var(--accent-hover); }

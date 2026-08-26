@@ -1,63 +1,99 @@
-{# One metric's check-in card. Re-rendered whole after each save (htmx). #}
-{% macro ck_input(row, cell) %}
+{# One metric's check-in row. Re-rendered whole after each save (htmx), which
+   is why the header counter rides along as an out-of-band swap below. #}
+
+{% macro ck_entry(row, cell, autofocus=false) %}
 {% if row.metric_type == 'status' %}
-<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
-      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
-  <button name="value" value="G" class="ck-status g {{ 'sel' if cell.raw == 'G' }}">G</button>
-  <button name="value" value="Y" class="ck-status y {{ 'sel' if cell.raw == 'Y' }}">Y</button>
-  <button name="value" value="R" class="ck-status r {{ 'sel' if cell.raw == 'R' }}">R</button>
-</form>
+<div class="ck-choice" role="group" aria-label="{{ row.name }}, week of {{ cell.week.strftime('%b %-d') }}">
+  {% for v, cls, label in [('G','g','G'), ('Y','y','Y'), ('R','r','R')] %}
+  <button class="ck-opt {{ cls }} {{ 'sel' if cell.raw == v }}"
+          hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+          hx-vals='{"value": "{{ v }}"}'
+          hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML"
+          aria-pressed="{{ 'true' if cell.raw == v else 'false' }}">{{ label }}</button>
+  {% endfor %}
+</div>
 {% elif row.metric_type == 'binary' %}
-<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
-      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
-  <button name="value" value="1" class="ck-status g {{ 'sel' if cell.raw == 1 }}">Yes</button>
-  <button name="value" value="0" class="ck-status r {{ 'sel' if cell.raw == 0 }}">No</button>
-</form>
+<div class="ck-choice" role="group" aria-label="{{ row.name }}, week of {{ cell.week.strftime('%b %-d') }}">
+  {% for v, cls, label in [(1,'g','Yes'), (0,'r','No')] %}
+  <button class="ck-opt {{ cls }} {{ 'sel' if cell.raw == v }}"
+          hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+          hx-vals='{"value": "{{ v }}"}'
+          hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML"
+          aria-pressed="{{ 'true' if cell.raw == v else 'false' }}">{{ label }}</button>
+  {% endfor %}
+</div>
 {% else %}
-<form class="ck-form" hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
-      hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
-  <input type="number" step="any" inputmode="decimal" name="value"
-         value="{{ '%g'|format(cell.raw) if cell.raw is not none else '' }}" placeholder="&ndash;">
-  <button class="btn sm" type="submit">Save</button>
+{# change, not submit: Enter in a single-field form fires change first and
+   implicit submission second, so listening to both would write - and audit -
+   the same number twice. onsubmit kills the browser navigation that would
+   otherwise follow, since htmx is not intercepting the submit. #}
+<form class="ck-entry" onsubmit="return false"
+      hx-post="/checkin/{{ row.metric_id }}/{{ cell.week.isoformat() }}"
+      hx-trigger="change" hx-target="#ck-{{ row.metric_id }}" hx-swap="outerHTML">
+  <input type="text" inputmode="decimal" name="value" class="ck-num"
+         data-ck-input value="{{ cell.display }}"
+         placeholder="{{ '&ndash;'|safe }}" autocomplete="off"
+         {% if autofocus %}data-ck-first{% endif %}
+         aria-label="{{ row.name }}, week of {{ cell.week.strftime('%b %-d') }}">
 </form>
 {% endif %}
 {% endmacro %}
 
-{% macro checkin_card(item, vm, open_earlier=false) %}
-<div class="ck-card {{ 'ck-due-missing' if item.due_missing }}" id="ck-{{ item.row.metric_id }}">
-  <div class="ck-head">
-    <div>
-      <div class="ck-section">{{ item.section }}</div>
-      <div class="ck-name">{{ item.row.name }}</div>
-    </div>
-    <span class="ck-chip {{ item.due.state.value if item.due else 'pending' }}">
-      {{ (item.due.display if item.due and item.due.display else 'missing') if item.due else '' }}
-    </span>
+
+{% macro checkin_row(item, vm) %}
+{% set row = item.row %}
+{% set cell = item.sel %}
+<div class="ck-row {{ 'is-missing' if item.missing }} {{ 'is-done' if cell and cell.raw is not none }}"
+     id="ck-{{ row.metric_id }}">
+  <div class="ck-metric">
+    <span class="dot {{ row.last_state }}" aria-hidden="true"></span>
+    <a class="ck-nm" href="/m/{{ row.metric_id }}">{{ row.name }}</a>
+    {% if row.is_key %}<span class="keymark" title="Leading indicator">&#9733;</span>{% endif %}
+    {% if row.red_streak >= 1 %}<span class="ck-streak">red wk {{ row.red_streak }}</span>{% endif %}
   </div>
-  {% if item.due %}
-  <div class="ck-week {{ 'missing' if item.due_missing }}">
-    <label>Last week &middot; {{ item.due.week.strftime('%b %-d') }}
-      {%- if item.row.target_display != '-' %} &middot; target {{ item.row.target_display }}{% endif %}
-      {%- if item.due_missing %} &middot; <strong>due now</strong>{% endif %}</label>
-    {{ ck_input(item.row, item.due) }}
-  </div>
-  {% endif %}
-  {% if item.cur %}
-  <div class="ck-week ck-current">
-    <label>This week &middot; {{ item.cur.week.strftime('%b %-d') }} &middot; optional early entry</label>
-    {{ ck_input(item.row, item.cur) }}
-  </div>
-  {% endif %}
-  {% if item.earlier %}
-  <details class="ck-earlier" {% if open_earlier or item.earlier_missing %}open{% endif %}>
-    <summary>Earlier weeks{% if item.earlier_missing %} &middot; <strong>{{ item.earlier_missing }} missing</strong>{% endif %}</summary>
-    {% for cell in item.earlier %}
-    <div class="ck-week {{ 'missing' if cell.raw is none }}">
-      <label>{{ cell.week.strftime('%b %-d') }} ({{ cell.week|qlabel }}){% if cell.raw is none %} &middot; <strong>no data</strong>{% endif %}</label>
-      {{ ck_input(item.row, cell) }}
-    </div>
+
+  <span class="spark ck-sparkline" aria-hidden="true">
+    {% for s in row.spark %}
+      {% if s.pct is not none %}<i class="bar {{ s.state }}" style="height:{{ (s.pct * 0.16) | round(0, 'floor') | int + 4 }}px"></i>
+      {% else %}<i class="{{ s.state }}"></i>{% endif %}
     {% endfor %}
-  </details>
-  {% endif %}
+  </span>
+
+  {# The number they entered last week, right where they are typing this one:
+     context for a numeric metric, and for a point-in-time one (MRR) it is
+     usually the answer. Falls back to the target when there is no last week.
+     Unlabelled on purpose - the column heading says it once. #}
+  <div class="ck-ctx">
+    {%- if item.prev and item.prev.display %}<b>{{ item.prev.display }}</b>
+    {%- elif row.target_display != '-' %}<b>{{ row.target_display }}</b>
+    {%- endif %}
+  </div>
+
+  <div class="ck-input">
+    {% if cell and cell.editable %}
+      {{ ck_entry(row, cell) }}
+    {% elif cell %}
+      <span class="ck-na" title="Not applicable this week">&mdash;</span>
+    {% endif %}
+  </div>
+
+  <div class="ck-mark">
+    {%- if cell and cell.raw is not none %}<span class="ck-tick" title="Saved">&#10003;</span>{% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+
+{# The counter is the only thing outside a row that a single save changes. #}
+{% macro progress_oob(prog) %}
+<div id="ck-progress" class="ck-progress" hx-swap-oob="true">
+  <div class="ck-count">
+    <b>{{ prog.entered }}</b> of {{ prog.total }} entered
+  </div>
+  <div class="ck-bar" role="progressbar" aria-valuenow="{{ prog.entered }}"
+       aria-valuemin="0" aria-valuemax="{{ prog.total }}"
+       aria-label="Numbers entered this week">
+    <i style="width:{{ (100 * prog.entered / prog.total) | round | int if prog.total else 0 }}%"></i>
+  </div>
 </div>
 {% endmacro %}

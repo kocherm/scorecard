@@ -7,7 +7,8 @@ import mimetypes
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
-from datetime import date, datetime, time as dt_time, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
+from urllib.parse import quote_plus
 from functools import partial, wraps
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,9 @@ BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 templates.env.filters["qlabel"] = lambda w: wk.quarter_label(
     w if isinstance(w, date) else wk.parse_week(w))
+# Owner initials, the same way the TV derives them - one rule, so a person is
+# not "MK" on the board and "M" on the television.
+templates.env.filters["initials"] = gridm._initials
 # Cache-buster: changes whenever any hand-written static asset does, so a
 # browser never serves a stale scorecard.css or passkey.js after a deploy.
 templates.env.globals["static_v"] = str(int(max(
@@ -546,6 +550,8 @@ def grid_page(request: Request, user=Depends(require_viewer),
               real: sqlite3.Connection = Depends(db_dep)):
     vm = gridm.build_grid(con, datetime.now(timezone.utc))
     return render(request, "grid.html", user=user, vm=vm, active="grid",
+                  actions=gridm.build_actions(con, vm),
+                  actor_id=_data_actor_id(con, user),
                   can_edit=user["role"] in ("editor", "admin"),
                   demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1",
                   display_token=dbm.get_setting(real, "display_token"))
@@ -607,34 +613,72 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
 
 
 # ---------------------------------------------------------------- my numbers
-def _checkin_items(con: sqlite3.Connection, uid: Optional[int], now: datetime):
-    """The (effective) user's owned metrics as check-in cards: due-week cell,
-    current-week cell, plus the earlier weeks of the display window (newest
-    first) for catching up on gaps or correcting numbers after the fact.
-    Missing-first ordering; every save is audited like any other write."""
+def _checkin_items(con: sqlite3.Connection, uid: Optional[int], now: datetime,
+                   sel_week: Optional[date] = None):
+    """The (effective) user's owned metrics as check-in rows, focused on ONE
+    week: `sel` is the cell being entered, `prev` the week before it (the
+    number they typed last time, which is the context that makes a number
+    enterable), and `earlier` the remaining editable weeks, for catch-up.
+
+    The page is week-major because the job is: Monday's task is "last week, all
+    of them", not "this metric, all its weeks". Selecting the current week
+    instead is what early entry became - one control at the top rather than a
+    second field on all eleven rows.
+
+    Order is the board's own order - section, then sort_order - not
+    missing-first. The list is short enough to see whole, and one that
+    reshuffles itself every week is one nobody learns the shape of; emphasis is
+    carried by state, not position. Every save is audited like any other write."""
     vm = gridm.build_grid(con, now)
+    sel_week = sel_week or vm.last_closed
+    prev_week = sel_week - timedelta(days=7)
     items = []
     for s in vm.sections:
         for r in s.rows:
             if r.dri_user_id != uid:
                 continue
-            due = next((c for c in r.cells if c.week == vm.last_closed), None)
-            cur = next((c for c in r.cells if c.week == vm.current_week), None)
+            by_week = {c.week: c for c in r.cells}
+            sel = by_week.get(sel_week)
             earlier = [c for c in r.cells
-                       if c.week < vm.last_closed and c.editable]
+                       if c.week < vm.last_closed and c.week != sel_week
+                       and c.editable]
             earlier.reverse()
             items.append({
-                "row": r, "section": s.name, "due": due, "cur": cur,
-                "due_missing": bool(due and due.raw is None and due.editable),
+                "row": r, "section": s.name,
+                "sel": sel, "prev": by_week.get(prev_week),
+                "missing": bool(sel and sel.raw is None and sel.editable),
                 "earlier": earlier,
                 "earlier_missing": sum(1 for c in earlier if c.raw is None),
             })
-    items.sort(key=lambda i: (not i["due_missing"], not i["earlier_missing"]))
     return vm, items
 
 
+def _checkin_groups(items):
+    """Items grouped into (section name, rows) runs, preserving board order."""
+    groups = []
+    for i in items:
+        if not groups or groups[-1][0] != i["section"]:
+            groups.append((i["section"], []))
+        groups[-1][1].append(i)
+    return groups
+
+
+def _checkin_progress(items) -> dict:
+    """Counts for the header: how much of the selected week's job is done, and
+    how much history is still open. `total` counts only cells that can actually
+    be entered, so a metric that started mid-quarter - or was archived - never
+    leaves the week permanently unfinishable."""
+    live = [i for i in items if i["sel"] and i["sel"].editable]
+    return {
+        "total": len(live),
+        "entered": sum(1 for i in live if i["sel"].raw is not None),
+        "missing": sum(1 for i in live if i["sel"].raw is None),
+        "gaps": sum(i["earlier_missing"] for i in items),
+    }
+
+
 @app.get("/checkin", response_class=HTMLResponse)
-def checkin_page(request: Request, t: str = "",
+def checkin_page(request: Request, t: str = "", saved: str = "", week: str = "",
                  con: sqlite3.Connection = Depends(data_db_dep),
                  real: sqlite3.Connection = Depends(db_dep)):
     """One focused page: enter your own numbers. Reached from the nav, the
@@ -654,10 +698,19 @@ def checkin_page(request: Request, t: str = "",
     if user["role"] == "viewer":
         raise HTTPException(403, "Viewers have no numbers to enter")
     now = datetime.now(timezone.utc)
-    vm, items = _checkin_items(con, _data_actor_id(con, user), now)
-    return render(request, "checkin.html", user=user, vm=vm, items=items,
-                  active="checkin",
-                  missing=sum(1 for i in items if i["due_missing"]),
+    # Only the two weeks the tabs offer are selectable here; anything else is
+    # catch-up, which has its own page. An unparseable ?week= falls back to the
+    # due week rather than 404ing a bookmarked link.
+    cur = wk.current_week(now)
+    sel = cur if week == cur.isoformat() else None
+    vm, items = _checkin_items(con, _data_actor_id(con, user), now, sel)
+    n = saved if saved.isdigit() else ""
+    return render(request, "checkin.html", user=user, vm=vm,
+                  groups=_checkin_groups(items), active="checkin",
+                  prog=_checkin_progress(items),
+                  sel_week=(sel or vm.last_closed), is_early=bool(sel),
+                  flash=(f"Caught up {n} number{'' if n == '1' else 's'}."
+                         if n else None),
                   demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1")
 
 
@@ -676,17 +729,127 @@ def checkin_save(metric_id: int, week: str, request: Request, value: str = Form(
     except ValueError as e:
         raise HTTPException(422, str(e))
     con.commit()
-    vm, items = _checkin_items(con, _data_actor_id(con, user), now)
+    # Re-render for the week that was just written, so the swapped row and the
+    # counter both describe the tab the person is actually looking at.
+    vm, items = _checkin_items(con, _data_actor_id(con, user), now, w)
     item = next((i for i in items if i["row"].metric_id == metric_id), None)
     if item is None:
         raise HTTPException(404)
-    # Keep the earlier-weeks section open when that's where they just saved,
-    # so multi-week catch-up doesn't collapse the section between edits.
+    # One row swaps, and the header counter with it (hx-swap-oob) - the count is
+    # the only thing on the page that a single save changes outside its own row,
+    # and it is the whole point of the progress bar.
     html = templates.env.from_string(
-        '{% from "_checkin_row.html" import checkin_card %}'
-        '{{ checkin_card(item, vm, open_earlier) }}').render(
-        item=item, vm=vm, open_earlier=w < vm.last_closed)
+        '{% from "_checkin_row.html" import checkin_row, progress_oob %}'
+        '{{ checkin_row(item, vm) }}{{ progress_oob(prog) }}').render(
+        item=item, vm=vm, prog=_checkin_progress(items))
     return HTMLResponse(html)
+
+
+# ------------------------------------------------------- catch up on gaps
+@app.get("/checkin/catch-up", response_class=HTMLResponse)
+def checkin_catchup(request: Request, err: str = "", user=Depends(require_editor),
+                    con: sqlite3.Connection = Depends(data_db_dep),
+                    real: sqlite3.Connection = Depends(db_dep)):
+    """Backfill, in a room of its own. Weeks across, metrics down, every input
+    on screen at once and one save - the shape of the job. It is deliberately
+    NOT on /checkin: a gap from two months ago reopening the weekly page every
+    Monday is how the weekly page became unusable."""
+    now = datetime.now(timezone.utc)
+    vm, items = _checkin_items(con, _data_actor_id(con, user), now)
+    prog = _checkin_progress(items)          # counted before the filter below
+    items = [i for i in items if i["earlier"]]
+    weeks = sorted({c.week for i in items for c in i["earlier"]}, reverse=True)
+    cells = {(i["row"].metric_id, c.week): c for i in items for c in i["earlier"]}
+    return render(request, "checkin_catchup.html", user=user, vm=vm,
+                  active="checkin", items=items, weeks=weeks, cells=cells,
+                  prog=prog, flash=err or None, flash_kind="err",
+                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1")
+
+
+async def raw_form(request: Request) -> dict:
+    """Raw form fields, for the routes whose field NAMES are data: the catch-up
+    matrix posts one field per metric-week, the targets page one pair per
+    metric. Async on purpose - request.form() has to be awaited, while the
+    endpoints stay sync so their sqlite connection keeps to the thread that
+    opened it. Field names are data, never authorisation: both callers
+    re-check what the person may write."""
+    return {k: v for k, v in (await request.form()).multi_items()
+            if isinstance(v, str)}
+
+
+@app.post("/checkin/catch-up")
+def checkin_catchup_save(request: Request, user=Depends(require_editor),
+                         form: dict = Depends(raw_form),
+                         con: sqlite3.Connection = Depends(data_db_dep)):
+    """Save every CHANGED cell of the matrix. Unchanged fields are skipped
+    rather than re-saved: a no-op write would still land in entry_audit, and an
+    audit trail padded with rows that changed nothing is one nobody reads."""
+    now = datetime.now(timezone.utc)
+    actor = _data_actor_id(con, _real_actor(request, user))
+    owned = {m["id"] for m in con.execute(
+        "SELECT id FROM metrics WHERE dri_user_id = ? AND archived_at IS NULL",
+        (_data_actor_id(con, user),))}
+    saved, errors = 0, []
+    for key, value in form.items():
+        if not key.startswith("v:"):
+            continue
+        _, mid, week = key.split(":", 2)
+        # The original is posted alongside so "unchanged" is decided on what the
+        # person was actually shown, not on a re-read that a concurrent write
+        # (an API writer, say) may already have moved.
+        if value.strip() == form.get(f"o:{mid}:{week}", "").strip():
+            continue
+        if int(mid) not in owned:
+            raise HTTPException(403, "Not your metric")
+        m = _metric_or_404(con, int(mid))
+        w = wk.parse_week(week)
+        if w > wk.current_week(now):
+            raise HTTPException(422, "Future week")
+        try:
+            entry_ops.save_value(con, m, w, value, source="manual", user_id=actor)
+            saved += 1
+        except ValueError as e:
+            errors.append(f"{m['name']} {w:%b %-d}: {e}")
+    con.commit()
+    if errors:
+        return RedirectResponse(
+            "/checkin/catch-up?err=" + quote_plus("; ".join(errors[:3])),
+            status_code=303)
+    # Back to the weekly page once the backfill lands: catching up is a job you
+    # finish and leave, not a place to stay.
+    return RedirectResponse(f"/checkin?saved={saved}", status_code=303)
+
+
+# ------------------------------------------------------------- metric page
+@app.get("/m/{metric_id}", response_class=HTMLResponse)
+def metric_page(metric_id: int, request: Request, year: int = 0, quarter: int = 0,
+                user=Depends(require_viewer),
+                con: sqlite3.Connection = Depends(data_db_dep),
+                real: sqlite3.Connection = Depends(db_dep)):
+    """Everything about one metric, in one place: the quarter week by week
+    against its target, who owns it, every write with its source, and the
+    1-3-1s it has caused. Reads the same scoring path as the board."""
+    now = datetime.now(timezone.utc)
+    mvm = gridm.build_metric(con, metric_id, now,
+                             year or None, quarter or None)
+    if mvm is None:
+        raise HTTPException(404)
+    otos = con.execute(
+        """SELECT o.*, u.display_name AS author FROM one_three_ones o
+           LEFT JOIN users u ON u.id = o.created_by
+           WHERE o.metric_id = ? ORDER BY o.week_start DESC""",
+        (metric_id,)).fetchall()
+    # Audit rows live in the same db as the entries they describe, so demo mode
+    # shows the demo copy's history rather than the real company's.
+    # "Enter" is only offered to the person whose page it would actually work
+    # on: /checkin lists the metrics you own, so an editor who is not the DRI
+    # would follow the link and find the metric missing.
+    return render(request, "metric.html", user=user, active="grid", m=mvm,
+                  audit=_audit_items(con, metric_id, limit=40), otos=otos,
+                  can_edit=user["role"] in ("editor", "admin"),
+                  can_enter=(user["role"] != "viewer" and not mvm.archived
+                             and mvm.dri_user_id == _data_actor_id(con, user)),
+                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1")
 
 
 # ---------------------------------------------------------------- 1-3-1
@@ -863,7 +1026,11 @@ def display_body(request: Request, token: str = "", view: str = "",
 # ---------------------------------------------------------------- admin
 @app.get("/admin", response_class=HTMLResponse)
 def admin_root(user=Depends(require_admin)):
-    return RedirectResponse("/admin/metrics", status_code=303)
+    """Health first, structure second. Opening Admin used to drop you into the
+    metric editor - the answer to "what shall I change?" before the answer to
+    "does any of this work?". Setup & status reads live state and is also the
+    page a half-configured instance needs on its first day."""
+    return RedirectResponse("/admin/status", status_code=303)
 
 
 @app.get("/admin/metrics", response_class=HTMLResponse)
@@ -965,43 +1132,66 @@ def unarchive_metric(metric_id: int, user=Depends(require_admin),
 # ---------------- targets
 @app.get("/admin/targets", response_class=HTMLResponse)
 def admin_targets(request: Request, year: Optional[int] = None, quarter: Optional[int] = None,
+                  saved: int = 0,
                   user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    now_w = wk.current_week(datetime.now(timezone.utc))
-    y, q = wk.quarter_of(now_w)
+    """Targets, with last quarter's evidence on the same row as the input."""
+    now = datetime.now(timezone.utc)
+    y, q = wk.quarter_of(wk.current_week(now))
     year = year or y
     quarter = quarter or q
-    metrics = con.execute(
-        """SELECT m.*, s.name AS section_name, u.display_name AS dri_name
-           FROM metrics m
-           JOIN sections s ON s.id = m.section_id
-           LEFT JOIN users u ON u.id = m.dri_user_id
-           WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
-           ORDER BY s.sort_order, m.sort_order""").fetchall()
-    rows = []
-    missing = 0
-    for m in metrics:
-        t = con.execute("SELECT * FROM targets WHERE metric_id=? AND year=? AND quarter=?",
-                        (m["id"], year, quarter)).fetchone()
-        if t is None:
-            missing += 1
-        rows.append(type("R", (), {"m": m, "t": t})())
+    rows = gridm.build_target_rows(con, year, quarter, now)
+    missing = sum(1 for r in rows if r.baseline is None)
     return render(request, "admin_targets.html", user=user, active="targets",
                   rows=rows, year=year, quarter=quarter,
-                  missing=missing if missing else None)
+                  missing=missing if missing else None,
+                  flash=(f"Saved {saved} target{'' if saved == 1 else 's'}."
+                         if saved else None))
 
 
-@app.post("/admin/targets/{metric_id}")
-def save_target(metric_id: int, year: int, quarter: int,
-                baseline: float = Form(...), stretch: float = Form(...),
-                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    con.execute(
-        """INSERT INTO targets (metric_id, year, quarter, baseline_value, stretch_value)
-           VALUES (?,?,?,?,?)
-           ON CONFLICT(metric_id, year, quarter) DO UPDATE SET
-             baseline_value = excluded.baseline_value,
-             stretch_value = excluded.stretch_value""",
-        (metric_id, year, quarter, baseline, stretch))
-    return RedirectResponse(f"/admin/targets?year={year}&quarter={quarter}", status_code=303)
+@app.post("/admin/targets")
+def save_targets(request: Request, year: int = Form(...), quarter: int = Form(...),
+                 form: dict = Depends(raw_form),
+                 user=Depends(require_admin),
+                 con: sqlite3.Connection = Depends(db_dep)):
+    """One save for the page. Targets are set in a single sitting, and a Save
+    per row made it impossible to tell whether you had finished."""
+    live = {m["id"] for m in con.execute(
+        "SELECT id FROM metrics WHERE archived_at IS NULL AND metric_type = 'numeric'")}
+    saved = 0
+    for key, value in form.items():
+        if not key.startswith("b:"):
+            continue
+        mid = int(key[2:])
+        if mid not in live:
+            raise HTTPException(403, "Not a live numeric metric")
+        b, st = value.strip(), form.get(f"s:{mid}", "").strip()
+        if b == "" or st == "":
+            # A target is a PAIR - baseline scores weeks 1-6 and stretch the
+            # rest, so half of one would silently score half the quarter
+            # against nothing. Blank both to leave a metric unset.
+            if b == "" and st == "":
+                continue
+            raise HTTPException(422, "Set both a baseline and a stretch, or neither")
+        try:
+            bv, sv = float(b), float(st)
+        except ValueError:
+            raise HTTPException(422, f"Targets must be numbers: {b!r}, {st!r}")
+        cur = con.execute(
+            "SELECT baseline_value, stretch_value FROM targets "
+            "WHERE metric_id=? AND year=? AND quarter=?", (mid, year, quarter)).fetchone()
+        if cur and (cur["baseline_value"], cur["stretch_value"]) == (bv, sv):
+            continue
+        con.execute(
+            """INSERT INTO targets (metric_id, year, quarter, baseline_value, stretch_value)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(metric_id, year, quarter) DO UPDATE SET
+                 baseline_value = excluded.baseline_value,
+                 stretch_value = excluded.stretch_value""",
+            (mid, year, quarter, bv, sv))
+        saved += 1
+    con.commit()
+    return RedirectResponse(
+        f"/admin/targets?year={year}&quarter={quarter}&saved={saved}", status_code=303)
 
 
 # ---------------- users
@@ -1264,20 +1454,23 @@ def _audit_value(mtype: Optional[str], unit: Optional[str],
     return gridm.fmt_value(mtype or "numeric", unit, numeric)
 
 
-@app.get("/admin/activity", response_class=HTMLResponse)
-def admin_activity(request: Request, user=Depends(require_admin),
-                   con: sqlite3.Connection = Depends(db_dep)):
-    """Every write, old value -> new value, who did it and when. Writes made
-    after the week's Wednesday-8am staleness deadline carry a LATE chip, so
-    quietly back-filling or 'correcting' history is always visible here."""
+def _audit_items(con: sqlite3.Connection, metric_id: Optional[int] = None,
+                 limit: int = 200) -> list[dict]:
+    """Audit rows, formatted once. The global Activity page and a single
+    metric's own history are the same list with a different WHERE - a second
+    formatter here is how the two would start disagreeing about what "LATE"
+    means."""
+    sql = """SELECT a.*, m.name AS metric_name, m.metric_type, m.unit,
+                    u.display_name AS actor_name, t.name AS token_name
+             FROM entry_audit a
+             LEFT JOIN metrics m ON m.id = a.metric_id
+             LEFT JOIN users u ON u.id = a.actor_user_id
+             LEFT JOIN api_tokens t ON t.id = a.actor_token_id
+             {where} ORDER BY a.id DESC LIMIT ?"""
+    args: tuple = ((metric_id, limit) if metric_id is not None else (limit,))
     rows = con.execute(
-        """SELECT a.*, m.name AS metric_name, m.metric_type, m.unit,
-                  u.display_name AS actor_name, t.name AS token_name
-           FROM entry_audit a
-           LEFT JOIN metrics m ON m.id = a.metric_id
-           LEFT JOIN users u ON u.id = a.actor_user_id
-           LEFT JOIN api_tokens t ON t.id = a.actor_token_id
-           ORDER BY a.id DESC LIMIT 200""").fetchall()
+        sql.format(where="WHERE a.metric_id = ?" if metric_id is not None else ""),
+        args).fetchall()
     items = []
     for a in rows:
         week = date.fromisoformat(a["week_start"])
@@ -1294,8 +1487,17 @@ def admin_activity(request: Request, user=Depends(require_admin),
             "source": a["source"],
             "late": changed >= wk.stale_at(week),
         })
+    return items
+
+
+@app.get("/admin/activity", response_class=HTMLResponse)
+def admin_activity(request: Request, user=Depends(require_admin),
+                   con: sqlite3.Connection = Depends(db_dep)):
+    """Every write, old value -> new value, who did it and when. Writes made
+    after the week's Wednesday-8am staleness deadline carry a LATE chip, so
+    quietly back-filling or 'correcting' history is always visible here."""
     return render(request, "admin_activity.html", user=user, active="activity",
-                  items=items)
+                  items=_audit_items(con))
 
 
 # ---------------- setup & status
@@ -1345,14 +1547,19 @@ def admin_status_apply_ids(pair: list[str] = Form([]), user=Depends(require_admi
 
 # ---------------- settings
 @app.get("/admin/settings", response_class=HTMLResponse)
-def admin_settings(request: Request, saved: str = "", user=Depends(require_admin),
+def admin_settings(request: Request, saved: str = "", tab: str = "",
+                   user=Depends(require_admin),
                    con: sqlite3.Connection = Depends(db_dep)):
     goal_metrics = con.execute(
         """SELECT m.id, m.name, s.name AS section FROM metrics m
            JOIN sections s ON s.id = m.section_id
            WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
            ORDER BY s.sort_order, m.sort_order""").fetchall()
+    # An unknown ?tab= falls back to the first group rather than rendering a
+    # page with no panels on it at all.
+    tab = tab if tab in ("display", "notify", "advanced") else "display"
     return render(request, "admin_settings.html", user=user, active="settings",
+                  tab=tab,
                   display_token=dbm.get_setting(con, "display_token"),
                   slack_webhook_url=dbm.get_setting(con, "slack_webhook_url") or "",
                   slack_bot_token=dbm.get_setting(con, "slack_bot_token") or "",
@@ -1390,14 +1597,27 @@ def _slack_verify(con: sqlite3.Connection) -> readiness.Check:
                 if c.key == "slack_token")
 
 
+# Which of the three groups each panel belongs to. One map, so a panel can
+# never be rendered in one tab and redirected to another.
+SETTINGS_TABS = {
+    "tv-display": "display", "tv-views": "display", "screensaver": "display",
+    "goal-band": "display", "display-window": "display",
+    "slack": "notify", "nudges": "notify", "channels": "notify",
+    "demo": "advanced",
+}
+
+
 def _settings_saved(section: str) -> RedirectResponse:
     """Back to the panel you were working in, with a confirmation on it.
 
     A bare redirect to /admin/settings scrolls to the top and looks identical
     whether or not anything was written - which is how a public base URL got
-    filled in, discarded by a sibling toggle's reload, and reported as saved."""
-    return RedirectResponse(f"/admin/settings?saved={section}#{section}",
-                            status_code=303)
+    filled in, discarded by a sibling toggle's reload, and reported as saved.
+    The tab rides along for the same reason: the anchor cannot land on a panel
+    the active tab is not rendering."""
+    tab = SETTINGS_TABS.get(section, "display")
+    return RedirectResponse(
+        f"/admin/settings?tab={tab}&saved={section}#{section}", status_code=303)
 
 
 @app.post("/admin/settings/goal-band")

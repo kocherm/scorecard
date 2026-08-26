@@ -4,7 +4,6 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>Users</h1>
-  <p class="page-sub">Admins manage everything. Editors update metrics. Viewers can only look.</p>
 </div>
 {% if temp_password %}
 <div class="flash ok">Temporary password for <strong>{{ temp_user }}</strong>: <span class="mono">{{ temp_password }}</span> - share it now; it is not shown again. They will be asked to change it on first sign-in.</div>
@@ -21,7 +20,7 @@
       <td>{{ u['email'] }}</td>
       <td>
         <form method="post" action="/admin/users/{{ u['id'] }}/role" style="display:inline">
-          <select name="role" onchange="this.form.submit()" {% if u['id'] == user['id'] %}disabled{% endif %}>
+          <select name="role" onchange="this.form.submit()" title="Admin: manages everything. Editor: updates metrics. Viewer: read-only." {% if u['id'] == user['id'] %}disabled{% endif %}>
             <option value="admin" {% if u['role'] == 'admin' %}selected{% endif %}>admin</option>
             <option value="editor" {% if u['role'] == 'editor' %}selected{% endif %}>editor</option>
             <option value="viewer" {% if u['role'] == 'viewer' %}selected{% endif %}>viewer</option>

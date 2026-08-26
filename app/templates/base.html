@@ -10,28 +10,47 @@
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
 {% from "_icons.html" import icon %}
+{% set admin_pages = [
+  ('status',   'Setup & status',    '/admin/status'),
+  ('metrics',  'Sections & metrics','/admin/metrics'),
+  ('targets',  'Targets',           '/admin/targets'),
+  ('users',    'Users',             '/admin/users'),
+  ('settings', 'Settings',          '/admin/settings'),
+  ('activity', 'Activity',          '/admin/activity'),
+  ('tokens',   'API tokens',        '/admin/tokens'),
+] %}
+{% set admin_pages_keys = admin_pages | map(attribute=0) | list %}
 {% block chrome %}
 <aside class="sidenav">
-  <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio" width="36" height="36"></a>
+  <a class="logo" href="#" onclick="openAbout(event)" title="About Aprendio"><img src="/static/logo-dark.svg" alt="Aprendio" width="32" height="32"><span>Scorecard</span></a>
+  {# Grouped by how often a person actually needs it, not by the route table.
+     Two destinations are weekly and shared by everyone; the seven admin screens
+     are quarterly and belong to one person, so they fold behind a single entry
+     with their own second-level nav. Nine unlabelled glyphs was a memory test. #}
   <nav>
-    <a href="/" title="Scorecard" class="{% if active == 'grid' %}active{% endif %}">{{ icon('grid') }}</a>
+    <div class="nav-group">This week</div>
+    <a href="/" class="nav-item {% if active == 'grid' %}active{% endif %}">
+      {{ icon('grid') }}<span>Board</span></a>
     {% if user and user['role'] != 'viewer' %}
-    <a href="/checkin" title="My numbers" class="{% if active == 'checkin' %}active{% endif %}">{{ icon('check') }}{% if request.state.checkin_missing %}<span class="nav-badge">{{ request.state.checkin_missing }}</span>{% endif %}</a>
+    <a href="/checkin" class="nav-item {% if active in ('checkin',) %}active{% endif %}">
+      {{ icon('check') }}<span>My numbers</span>
+      {%- if request.state.checkin_missing %}<span class="nav-badge">{{ request.state.checkin_missing }}</span>{% endif %}</a>
     {% endif %}
     {% if user and user['role'] == 'admin' %}
-    <a href="/admin/metrics" title="Sections &amp; Metrics" class="{% if active == 'metrics' %}active{% endif %}">{{ icon('sliders') }}</a>
-    <a href="/admin/targets" title="Targets" class="{% if active == 'targets' %}active{% endif %}">{{ icon('target') }}</a>
-    <a href="/admin/users" title="Users" class="{% if active == 'users' %}active{% endif %}">{{ icon('users') }}</a>
-    <a href="/admin/tokens" title="API tokens" class="{% if active == 'tokens' %}active{% endif %}">{{ icon('key') }}</a>
-    <a href="/admin/activity" title="Activity (audit trail)" class="{% if active == 'activity' %}active{% endif %}">{{ icon('history') }}</a>
-    <a href="/admin/settings" title="Settings" class="{% if active == 'settings' %}active{% endif %}">{{ icon('gear') }}</a>
-    <a href="/admin/status" title="Setup &amp; status" class="{% if active == 'status' %}active{% endif %}">{{ icon('pulse') }}{% if request.state.setup_blocked %}<span class="nav-badge alert">{{ request.state.setup_blocked }}</span>{% endif %}</a>
+    <div class="nav-group">Set up</div>
+    <a href="/admin" class="nav-item {% if active in admin_pages_keys %}active{% endif %}">
+      {{ icon('gear') }}<span>Admin</span>
+      {%- if request.state.setup_blocked %}<span class="nav-badge alert">{{ request.state.setup_blocked }}</span>{% endif %}</a>
     {% endif %}
   </nav>
   <div class="grow"></div>
   {% if user %}
-  <a href="/account" title="{{ user['display_name'] }} &middot; Account" class="{% if active == 'account' %}active{% endif %}">{{ icon('user') }}</a>
-  <form method="post" action="/logout"><button type="submit" title="Sign out">{{ icon('signout') }}</button></form>
+  <a href="/account" class="nav-item {% if active == 'account' %}active{% endif %}"
+     title="{{ user['display_name'] }} &middot; Account">
+    {{ icon('user') }}<span>{{ user['display_name'] }}</span></a>
+  <form method="post" action="/logout">
+    <button type="submit" class="nav-item">{{ icon('signout') }}<span>Sign out</span></button>
+  </form>
   {% endif %}
 </aside>
 {% endblock %}
@@ -41,6 +60,14 @@
   <span>Viewing as <strong>{{ user['display_name'] }}</strong> ({{ user['role'] }}) &mdash; you see exactly what they see; anything you save is recorded as {{ request.state.impersonator['display_name'] }}.</span>
   <form method="post" action="/impersonate/stop"><button class="btn sm">Exit view-as</button></form>
 </div>
+{% endif %}
+{% if active in admin_pages_keys %}
+<nav class="subnav" aria-label="Admin sections">
+  {% for key, label, href in admin_pages %}
+  <a href="{{ href }}" class="{% if active == key %}on{% endif %}">{{ label }}
+    {%- if key == 'status' and request.state.setup_blocked %}<i>{{ request.state.setup_blocked }}</i>{% endif %}</a>
+  {% endfor %}
+</nav>
 {% endif %}
 {% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
 {% block content %}{% endblock %}

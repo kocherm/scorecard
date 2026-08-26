@@ -20,7 +20,7 @@
     <tr><th>Metric</th><th>Type</th><th>DRI</th><th>Unit</th><th>Direction</th><th>Start week</th><th></th></tr>
     {% for m in s.metrics %}
     <tr {% if m['archived_at'] %}style="opacity:.45"{% endif %}>
-      <td>{{ m['name'] }}</td>
+      <td><a href="/m/{{ m['id'] }}">{{ m['name'] }}</a></td>
       <td>{{ m['metric_type'] }}{% if m['rollup'] %} ({{ m['rollup'] }}){% endif %}</td>
       <td>{{ m['dri_name'] or '-' }}</td>
       <td>{{ m['unit'] or '-' }}</td>

@@ -4,7 +4,23 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>Settings</h1>
+  <p class="page-sub">{{ {'display': 'What the television shows, and how far back the board looks.',
+                          'notify': 'Where alerts and check-in nudges go, and who can be reached.',
+                          'advanced': 'Instance-level switches. Nothing here changes a number.'}[tab] }}</p>
 </div>
+
+{# Three groups, not nine stacked panels: what the TV shows, how people get
+   told, and instance switches. Server-side rather than a JS tab, so the
+   "Saved." anchor still lands on the panel that was saved. #}
+<nav class="stabs" aria-label="Settings groups">
+  {% for key, label in [('display', 'Display &amp; TV'), ('notify', 'Notifications'),
+                        ('advanced', 'Advanced')] %}
+  <a href="/admin/settings?tab={{ key }}"
+     class="{% if tab == key %}on{% endif %}">{{ label|safe }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'display' %}
 <div class="panel" id="tv-display" style="max-width:640px">
   {% if saved == "tv-display" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>TV display</h2>
@@ -17,7 +33,8 @@
 <div class="panel" id="tv-views" style="max-width:640px">
   {% if saved == "tv-views" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>TV views</h2>
-  <p class="note">Which boards the TV cycles through, and how long each one stays up. The TV decides server-side on its own poll, so a unit with no keyboard rotates by itself and two screens in the same room stay in step. A view with nothing to show is skipped &mdash; &ldquo;Act on this&rdquo; is empty exactly when nothing is red, and a blank screen reads as broken. Pick one view and set the seconds to 0 to hold it still.</p>
+  <p class="note">Which boards the TV cycles through, and how long each one stays up.</p>
+  <details class="why"><summary>How rotation decides</summary><p class="note"> The TV decides server-side on its own poll, so a unit with no keyboard rotates by itself and two screens in the same room stay in step. A view with nothing to show is skipped &mdash; &ldquo;Act on this&rdquo; is empty exactly when nothing is red, and a blank screen reads as broken. Pick one view and set the seconds to 0 to hold it still.</p></details>
   <form method="post" action="/admin/settings/tv-views">
     <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:14px">
       {% for key, label in view_labels %}
@@ -45,7 +62,8 @@
       <button class="btn {{ 'danger' if screensaver_enabled else '' }} sm">{{ 'Turn off screensaver' if screensaver_enabled else 'Turn on screensaver' }}</button>
     </form>
   </div>
-  <p class="note" style="margin-top:10px">Blacks out the TV board every night between these times (a dim clock drifts around so nothing burns into the panel). The board comes back on its own when the window ends &mdash; within about ten seconds either way, same as any change on this page. Times are in the business timezone and the window may cross midnight, e.g. 9:00&nbsp;PM to 6:00&nbsp;AM.</p>
+  <details class="why"><summary>What the screensaver does</summary>
+  <p class="note" style="margin-top:10px">Blacks out the TV board every night between these times (a dim clock drifts around so nothing burns into the panel). The board comes back on its own when the window ends &mdash; within about ten seconds either way, same as any change on this page. Times are in the business timezone and the window may cross midnight, e.g. 9:00&nbsp;PM to 6:00&nbsp;AM.</p></details>
   <form method="post" action="/admin/settings/screensaver" style="display:flex; gap:10px; align-items:end">
     <div><label>Starts</label>
       <input type="time" name="screensaver_start" value="{{ screensaver_start }}" required style="width:130px"></div>
@@ -57,7 +75,8 @@
 <div class="panel" id="goal-band" style="max-width:640px">
   {% if saved == "goal-band" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>TV goal band</h2>
-  <p class="note">The big number and progress track at the top of the TV board. Picks the metric it follows (auto-detects a metric named "MRR" when unset), the long-range goal, and optional milestone ticks along the track.</p>
+  <details class="why"><summary>What the goal band shows</summary>
+  <p class="note">The big number and progress track at the top of the TV board. Picks the metric it follows (auto-detects a metric named "MRR" when unset), the long-range goal, and optional milestone ticks along the track.</p></details>
   <form method="post" action="/admin/settings/goal-band">
     <label>Metric</label>
     <select name="hud_mrr_metric_id">
@@ -87,6 +106,9 @@
     <button class="btn" type="submit">Save</button>
   </form>
 </div>
+{% endif %}
+
+{% if tab == 'notify' %}
 <div class="panel" id="slack" style="max-width:640px">
   {# Saving a bot token used to be a leap of faith: the string looks identical
      whether it belongs to your workspace or somebody else's. Now the save says
@@ -199,6 +221,9 @@
 </div>
 {# Last on the page: it's the only switch that changes what everyone sees, and
    it's reached rarely (screenshots and demos), so it stays out of the way. #}
+{% endif %}
+
+{% if tab == 'advanced' %}
 <div class="panel" id="demo" style="max-width:640px">
   {% if saved == "demo" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <div style="display:flex; align-items:center; gap:12px">
@@ -210,4 +235,5 @@
   </div>
   <p class="note" style="margin-top:10px">Fills the board and TV display with a fictional company &mdash; for screenshots, screen recordings, and product demos. Your real data is never modified: the demo lives in a separate throwaway database, rebuilt fresh each time this is switched on (and each new week). Edits made on the grid while it is on land in the demo copy only. Login, admin pages, Slack alerts, and the JSON API keep using real data throughout. The TV display URL at the top of this page keeps working and shows the demo while enabled.</p>
 </div>
+{% endif %}
 {% endblock %}

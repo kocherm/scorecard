@@ -87,6 +87,48 @@ Slack app manifest). Check `git grep` before every commit.
   endpoint runs on the event loop while its dependency ran in the threadpool,
   and every query raises. JSON bodies come in through Body(), not
   `await request.json()`.
+- Admin > Targets shows LAST quarter's target, actual and hit rate on the row
+  you are typing into (grid.build_target_rows), and saves the whole page at
+  once. The actual is the weekly MEAN, not the quarter total: a weekly target
+  is compared with a weekly number, and summing would put 28 next to a target
+  of 10. A target is a PAIR - baseline scores weeks 1-6 and stretch the rest -
+  so the POST refuses one without the other rather than leaving half a quarter
+  scored against nothing.
+- Admin > Settings is three server-side groups (?tab=display|notify|advanced),
+  and SETTINGS_TABS in main.py is the single map from panel id to group. It is
+  what _settings_saved uses too: an anchor cannot land on a panel the active
+  tab is not rendering, so adding a panel means adding a row there.
+
+- /m/{id} (grid.build_metric) is the metric's own page: one quarter week by
+  week, its 1-3-1s, and every write with its source. It scores through
+  sc.cell_state on the same data the grid uses - a metric that read red there
+  and green on the board would be worse than not having the page. Entry links
+  point at whichever page can actually save that week (/checkin, ?week= for the
+  current one, /checkin/catch-up for older), and only for the DRI, since
+  /checkin only lists metrics you own.
+
+- Navigation groups by CADENCE, not by route: the rail holds Board, My numbers
+  and a single Admin entry; the seven admin screens live in base.html's
+  `admin_pages` list and render as a second-level .subnav on admin pages only.
+  Add an admin screen by adding a row there - putting it in the rail puts a
+  quarterly job next to a weekly one. /admin lands on /admin/status, not the
+  metric editor: "does this instance work?" comes before "what shall I change?",
+  and that page is also the first-run setup list.
+
+- /checkin is WEEK-major, not metric-major: one row per metric for ONE selected
+  week (the due week, or the current week via the tab), with backfill moved to
+  /checkin/catch-up. That split is the design - auto-opening earlier weeks on
+  the weekly page meant one two-month-old gap re-expanded the card every Monday
+  forever. Two things there are load-bearing: the numeric field's htmx trigger
+  is `change` and NOT `submit`, because Enter in a single-field form fires
+  change first and implicit submission second, so listening to both writes the
+  same number - and audits it - twice (onsubmit="return false" kills the
+  navigation htmx is no longer intercepting); and the catch-up matrix posts the
+  rendered value alongside each field (o:<id>:<week>) so an untouched field is
+  skipped rather than re-saved, since a no-op write still lands in entry_audit.
+  Field names there are data, never authorisation - the POST re-checks DRI
+  ownership per metric.
+
 - App config is key-value rows in the settings table (db.get_setting/set_setting),
   edited on Admin > Settings. Settings always live in the REAL db - demo mode
   swaps only the data db, so TV behavior toggles (demo, screensaver) keep
@@ -120,7 +162,12 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
 - migrate/seed_data.local.json is required to seed; copy from seed_data.example.json.
 - Passwords/tokens are hashed in DB; temp passwords and API tokens print exactly once.
 - Styling: CSS custom properties in app/static/scorecard.css only - no new hex
-  values, no emoji in UI. Brand reference lives outside this repo.
+  values, no emoji in UI. Brand reference lives outside this repo. Watch SPECIFICITY when
+  adding a state class: `.ck-row.is-missing .ck-num` (0,3,0) silently beat
+  `.ck-num:focus` (0,2,0) and left the field being typed in with no focus
+  colour, and `.sidenav .nav-item span` matched `.nav-badge` and gave the count
+  flex:1, ellipsising the label beside it. State rules go before focus rules,
+  and container rules exclude the components they should not reach.
 - Slack two-way replies need Scorecard's OWN Slack app - never share a bot user
   with a chat agent that also lives in the workspace. Slack delivers message.im
   to exactly one consumer per app, and Socket Mode (what agent gateways use)

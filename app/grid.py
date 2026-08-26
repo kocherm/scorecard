@@ -266,6 +266,9 @@ def build_grid(con: sqlite3.Connection, now: datetime,
 class ActionItem:
     kind: str        # 'red' | 'stale'
     badge: str       # 'RED WK 2' / 'NO DATA'
+    metric_id: int
+    week: str        # last closed week, for the 1-3-1 link
+    has_131: bool
     name: str
     value_display: str
     target_display: str
@@ -428,6 +431,59 @@ def _layout_board(groups: list[BoardSection]) -> tuple[list, int, int]:
     return columns, max(board_rows, 1), board_secs
 
 
+def build_actions(con: sqlite3.Connection, vm: GridVM) -> list[ActionItem]:
+    """The last closed week's reds and stales as decision cards: the escalation
+    step it has reached, who owns it, and the number that earned it.
+
+    ONE builder, shared by the TV's "Act on this" view and the board page. It
+    reads a GridVM that is already built rather than re-querying, so the cards
+    can never disagree with the grid under them - and it lives here, not in
+    build_tv, because the board needed this layer as much as the television did
+    and had no way to get it.
+
+    Reds first, then stales, each alphabetical: an order that does not depend on
+    the clock, so a card cannot move between two polls of the same board."""
+    actions: list[ActionItem] = []
+    closed_targets: dict[int, Optional[float]] = {}
+    for t in con.execute("SELECT metric_id, year, quarter, baseline_value, "
+                         "stretch_value FROM targets"):
+        if (t["year"], t["quarter"]) == wk.quarter_of(vm.last_closed):
+            closed_targets[t["metric_id"]] = sc.target_for_week(
+                vm.last_closed, sc.QuarterTargets(t["baseline_value"],
+                                                  t["stretch_value"]))
+    for section in vm.sections:
+        for row in section.rows:
+            closed = next((c for c in row.cells if c.week == vm.last_closed), None)
+            if row.red_streak >= 1:
+                lvl = min(row.red_streak, 3)
+                step = NEXT_STEP[lvl]
+                if lvl == 1 and row.has_131:
+                    step = "1-3-1 filed - review in sync"
+                ct = closed_targets.get(row.metric_id)
+                ct_display = (fmt_value("numeric", row.unit, ct) if ct is not None
+                              else ("G" if row.metric_type == "status" else "-"))
+                actions.append(ActionItem(
+                    kind="red", badge=f"RED WK {row.red_streak}",
+                    metric_id=row.metric_id, name=row.name,
+                    value_display=(closed.display if closed and closed.display else "R"),
+                    target_display=ct_display,
+                    dri_name=row.dri_name, initials=_initials(row.dri_name),
+                    has_131=row.has_131,
+                    week=vm.last_closed.isoformat(),
+                    next_step=step))
+            elif row.last_state == "stale":
+                actions.append(ActionItem(
+                    kind="stale", badge="NO DATA",
+                    metric_id=row.metric_id, name=row.name, value_display="-",
+                    target_display=row.target_display,
+                    dri_name=row.dri_name, initials=_initials(row.dri_name),
+                    has_131=row.has_131,
+                    week=vm.last_closed.isoformat(),
+                    next_step="enter last week's number"))
+    actions.sort(key=lambda a: (a.kind != "red", a.name))
+    return actions
+
+
 def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
     from .db import get_setting
     vm = build_grid(con, now)
@@ -436,16 +492,12 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
         return next((c for c in row.cells if c.week == week), None)
 
     targets_by_metric: dict[int, Optional[float]] = {}
-    closed_targets: dict[int, Optional[float]] = {}
     for t in con.execute("SELECT metric_id, year, quarter, baseline_value, stretch_value FROM targets"):
         qt = sc.QuarterTargets(t["baseline_value"], t["stretch_value"])
         if (t["year"], t["quarter"]) == wk.quarter_of(vm.current_week):
             targets_by_metric[t["metric_id"]] = sc.target_for_week(vm.current_week, qt)
-        if (t["year"], t["quarter"]) == wk.quarter_of(vm.last_closed):
-            closed_targets[t["metric_id"]] = sc.target_for_week(vm.last_closed, qt)
 
     rows: list[BoardRow] = []
-    actions: list[ActionItem] = []
     for section in vm.sections:
         for row in section.rows:
             cur = find_cell(row, vm.current_week)
@@ -472,30 +524,8 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 spark=row.spark, red_streak=row.red_streak,
                 section=section.name))
 
-            if row.red_streak >= 1:
-                lvl = min(row.red_streak, 3)
-                step = NEXT_STEP[lvl]
-                if lvl == 1 and row.has_131:
-                    step = "1-3-1 filed - review in sync"
-                ct = closed_targets.get(row.metric_id)
-                ct_display = (fmt_value("numeric", row.unit, ct) if ct is not None
-                              else ("G" if row.metric_type == "status" else "-"))
-                actions.append(ActionItem(
-                    kind="red", badge=f"RED WK {row.red_streak}",
-                    name=row.name,
-                    value_display=(closed.display if closed and closed.display else "R"),
-                    target_display=ct_display,
-                    dri_name=row.dri_name, initials=_initials(row.dri_name),
-                    next_step=step))
-            elif row.last_state == "stale":
-                actions.append(ActionItem(
-                    kind="stale", badge="NO DATA",
-                    name=row.name, value_display="-",
-                    target_display=row.target_display,
-                    dri_name=row.dri_name, initials=_initials(row.dri_name),
-                    next_step="enter last week's number"))
 
-    actions.sort(key=lambda a: (a.kind != "red", a.name))
+    actions = build_actions(con, vm)
 
     # ---- goal band: explicit setting wins, else detect a metric named "MRR"
     mrr = None
@@ -573,3 +603,240 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
     return TvVM(vm=vm, mrr=mrr, columns=columns,
                 board_rows=board_rows, board_secs=board_secs,
                 actions=actions[:3], more_actions=max(0, len(actions) - 3))
+
+
+# ---------------------------------------------------- one metric, in full
+@dataclass
+class MetricPoint:
+    week: date
+    label: str            # "Q3-W6"
+    date_label: str       # "Aug 10"
+    state: str
+    display: str
+    raw: Optional[float | str]
+    target: Optional[float]
+    target_display: str
+    editable: bool
+    is_current: bool
+
+
+@dataclass
+class MetricVM:
+    metric_id: int
+    name: str
+    section: str
+    metric_type: str
+    rollup: Optional[str]
+    direction: str
+    unit: Optional[str]
+    is_key: bool
+    archived: bool
+    dri_name: str
+    dri_user_id: Optional[int]
+    quarter_label: str
+    year: int
+    quarter: int
+    points: list[MetricPoint]     # every week of the quarter to date
+    last_closed: date
+    current_week: date
+    latest: Optional[MetricPoint]  # the last closed week
+    baseline: Optional[float]
+    stretch: Optional[float]
+    red_streak: int
+    escalation: int
+    quarter_total_display: str
+    hit_weeks: int                # closed weeks scored green
+    scored_weeks: int             # closed weeks with a number and a target
+
+
+def build_metric(con: sqlite3.Connection, metric_id: int, now: datetime,
+                 year: Optional[int] = None,
+                 quarter: Optional[int] = None) -> Optional[MetricVM]:
+    """One metric across one quarter: every week, its target, and how it scored.
+
+    This is the address the product never had. "Why is this red?" used to mean
+    reading the board, then Activity, then Targets, then the 1-3-1, and holding
+    the four in your head. Scores through sc.cell_state exactly as the grid and
+    the TV do - a metric that reads red here and green on the board would be
+    worse than no page at all."""
+    tz = wk.BUSINESS_TZ
+    m = con.execute(
+        """SELECT m.*, s.name AS section_name, u.display_name AS dri_name
+           FROM metrics m
+           JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id
+           WHERE m.id = ?""", (metric_id,)).fetchone()
+    if m is None:
+        return None
+
+    today = now.astimezone(tz).date()
+    cur_week = wk.monday_of(today)
+    last_closed = wk.last_closed_week(now, tz)
+    if year is None or quarter is None:
+        year, quarter = wk.quarter_of(last_closed)
+
+    # Every Monday of the quarter, stopping at the current week: a quarter that
+    # has not happened yet is not evidence.
+    start = wk.first_monday_of_quarter(year, quarter)
+    weeks: list[date] = []
+    w = start
+    while wk.quarter_of(w) == (year, quarter) and w <= cur_week:
+        weeks.append(w)
+        w += timedelta(days=7)
+
+    t = con.execute(
+        """SELECT baseline_value, stretch_value FROM targets
+           WHERE metric_id = ? AND year = ? AND quarter = ?""",
+        (metric_id, year, quarter)).fetchone()
+    qt = sc.QuarterTargets(t["baseline_value"], t["stretch_value"]) if t else None
+
+    entries = {r["week_start"]: sc.EntryInfo(r["value_numeric"], r["value_status"])
+               for r in con.execute(
+                   "SELECT week_start, value_numeric, value_status FROM entries "
+                   "WHERE metric_id = ?", (metric_id,))}
+    info = _metric_info(m)
+
+    points, values = [], []
+    hit = scored = 0
+    for w in weeks:
+        ei = entries.get(w.isoformat())
+        target = sc.target_for_week(w, qt)
+        state = sc.cell_state(info, w, ei, target, now, tz)
+        raw = None
+        if ei is not None:
+            raw = ei.value_status if m["metric_type"] == "status" else ei.value_numeric
+        if w <= last_closed and raw is not None and target is not None:
+            scored += 1
+            if state == sc.CellState.GREEN:
+                hit += 1
+        if raw is not None and m["metric_type"] != "status":
+            values.append(sc.EntryInfo(ei.value_numeric, None))
+        points.append(MetricPoint(
+            week=w, label=wk.quarter_label(w), date_label=w.strftime("%b %-d"),
+            state=state.value,
+            display=fmt_value(m["metric_type"], m["unit"], raw), raw=raw,
+            target=target,
+            target_display=(fmt_value("numeric", m["unit"], target)
+                            if target is not None else
+                            ("G" if m["metric_type"] == "status" else "-")),
+            editable=(state != sc.CellState.NA), is_current=(w == cur_week)))
+
+    states_desc = []
+    for i in range(8):
+        w = last_closed - timedelta(days=7 * i)
+        if w < info.start_week:
+            break
+        states_desc.append(sc.cell_state(info, w, entries.get(w.isoformat()),
+                                         sc.target_for_week(w, qt), now, tz))
+    streak = sc.consecutive_red_weeks(states_desc)
+
+    total = sc.month_subtotal(m["metric_type"], m["rollup"], values)
+    if isinstance(total, float):
+        total = fmt_value("numeric", m["unit"], total)
+
+    return MetricVM(
+        metric_id=m["id"], name=m["name"], section=m["section_name"],
+        metric_type=m["metric_type"], rollup=m["rollup"], direction=m["direction"],
+        unit=m["unit"], is_key=bool(m["is_key"]), archived=bool(m["archived_at"]),
+        dri_name=m["dri_name"] or "-", dri_user_id=m["dri_user_id"],
+        quarter_label=f"Q{quarter} {year}", year=year, quarter=quarter,
+        points=points, last_closed=last_closed, current_week=cur_week,
+        latest=next((p for p in points if p.week == last_closed), None),
+        baseline=(t["baseline_value"] if t else None),
+        stretch=(t["stretch_value"] if t else None),
+        red_streak=streak, escalation=sc.escalation_level(streak),
+        quarter_total_display=(total if isinstance(total, str) else "-"),
+        hit_weeks=hit, scored_weeks=scored)
+
+
+# ------------------------------------------------- setting targets, with evidence
+@dataclass
+class TargetRow:
+    metric: sqlite3.Row
+    baseline: Optional[float]
+    stretch: Optional[float]
+    prev_label: str                  # "Q2 2026"
+    prev_baseline_display: str
+    prev_actual: Optional[float]
+    prev_actual_display: str
+    prev_delta_pct: Optional[int]    # actual vs baseline, signed
+    hit_weeks: int
+    scored_weeks: int
+
+
+def build_target_rows(con: sqlite3.Connection, year: int, quarter: int,
+                      now: datetime) -> list[TargetRow]:
+    """Every numeric metric's target for one quarter, next to what actually
+    happened last quarter.
+
+    Setting a target is the most consequential thing an admin does - it defines
+    red, yellow and green for thirteen weeks, for everyone - and the page for it
+    used to be empty number boxes with no context at all. "You hit this 2 weeks
+    out of 13" is the fact that should drive the number, and it is already in
+    the database."""
+    tz = wk.BUSINESS_TZ
+    py, pq = (year - 1, 4) if quarter == 1 else (year, quarter - 1)
+    prev_weeks = []
+    w = wk.first_monday_of_quarter(py, pq)
+    while wk.quarter_of(w) == (py, pq):
+        prev_weeks.append(w)
+        w += timedelta(days=7)
+    last_closed = wk.last_closed_week(now, tz)
+
+    metrics = con.execute(
+        """SELECT m.*, s.name AS section_name, u.display_name AS dri_name
+           FROM metrics m
+           JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id
+           WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
+           ORDER BY s.sort_order, m.sort_order""").fetchall()
+
+    rows = []
+    for m in metrics:
+        t = con.execute(
+            "SELECT * FROM targets WHERE metric_id=? AND year=? AND quarter=?",
+            (m["id"], year, quarter)).fetchone()
+        pt = con.execute(
+            "SELECT * FROM targets WHERE metric_id=? AND year=? AND quarter=?",
+            (m["id"], py, pq)).fetchone()
+        pqt = (sc.QuarterTargets(pt["baseline_value"], pt["stretch_value"])
+               if pt else None)
+        entries = {r["week_start"]: sc.EntryInfo(r["value_numeric"], r["value_status"])
+                   for r in con.execute(
+                       "SELECT week_start, value_numeric, value_status FROM entries "
+                       "WHERE metric_id = ?", (m["id"],))}
+        info = _metric_info(m)
+
+        vals, hit, scored = [], 0, 0
+        for pw in prev_weeks:
+            ei = entries.get(pw.isoformat())
+            if ei is not None and ei.value_numeric is not None:
+                vals.append(ei.value_numeric)
+            if pw > last_closed:
+                continue
+            target = sc.target_for_week(pw, pqt)
+            if ei is None or ei.value_numeric is None or target is None:
+                continue
+            scored += 1
+            if sc.cell_state(info, pw, ei, target, now, tz) == sc.CellState.GREEN:
+                hit += 1
+
+        # The weekly MEAN, not the quarter total: a weekly target is compared
+        # with a weekly number, whatever the metric rolls up to.
+        actual = (sum(vals) / len(vals)) if vals else None
+        pb = pt["baseline_value"] if pt else None
+        delta = (round((actual - pb) / pb * 100) if actual is not None
+                 and pb not in (None, 0) else None)
+
+        rows.append(TargetRow(
+            metric=m,
+            baseline=(t["baseline_value"] if t else None),
+            stretch=(t["stretch_value"] if t else None),
+            prev_label=f"Q{pq} {py}",
+            prev_baseline_display=(fmt_value("numeric", m["unit"], pb)
+                                   if pb is not None else "-"),
+            prev_actual=actual,
+            prev_actual_display=(fmt_value("numeric", m["unit"], actual)
+                                 if actual is not None else "-"),
+            prev_delta_pct=delta, hit_weeks=hit, scored_weeks=scored))
+    return rows

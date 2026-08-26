@@ -4,33 +4,119 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>Targets &middot; Q{{ quarter }} {{ year }}</h1>
-  <p class="page-sub">Baseline applies quarter-weeks 1-6, stretch from week 7 to quarter end. Changing a target rescores the whole quarter.</p>
+  <p class="page-sub">Baseline scores quarter-weeks 1&ndash;6, stretch from week 7 to the
+    quarter end. Changing a target rescores the whole quarter.</p>
 </div>
-<div class="panel">
-  <form method="get" style="display:flex; gap:10px; align-items:end; margin-bottom:14px">
-    <div><label>Year</label><input type="number" name="year" value="{{ year }}" style="width:100px"></div>
-    <div><label>Quarter</label>
-      <select name="quarter" style="width:80px">
+
+<div class="panel tg-panel">
+  <div class="tg-head">
+    <form method="get" class="tg-qpick">
+      <select name="quarter" aria-label="Quarter">
         {% for q in [1,2,3,4] %}<option value="{{ q }}" {% if q == quarter %}selected{% endif %}>Q{{ q }}</option>{% endfor %}
-      </select></div>
-    <button class="btn secondary sm">View</button>
+      </select>
+      <input type="number" name="year" value="{{ year }}" aria-label="Year">
+      <button class="btn secondary sm">View</button>
+    </form>
+  </div>
+
+  {% if missing %}
+  <div class="flash warn">{{ missing }} metric{{ '' if missing == 1 else 's' }} have no
+    target for Q{{ quarter }} {{ year }}. They show values without colour until set.</div>
+  {% endif %}
+
+  {% if not rows %}
+  <p class="note">No live numeric metrics. Add one under
+    <a href="/admin/metrics">Sections &amp; metrics</a>.</p>
+  {% else %}
+  <form method="post" action="/admin/targets" id="tg-form">
+  <input type="hidden" name="year" value="{{ year }}">
+  <input type="hidden" name="quarter" value="{{ quarter }}">
+  <div class="tg-wrap">
+    <table class="tg">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th class="r ev">{{ rows[0].prev_label }} target</th>
+          <th class="r ev">{{ rows[0].prev_label }} actual</th>
+          <th class="r ev">Hit rate</th>
+          <th class="r">Baseline<span>weeks 1&ndash;6</span></th>
+          <th class="r">Stretch<span>week 7+</span></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="tg-metric">
+            <a href="/m/{{ r.metric['id'] }}">{{ r.metric['name'] }}</a>
+            <span class="tg-sub">{{ r.metric['section_name'] }}
+              {%- if r.metric['dri_name'] %} &middot; {{ r.metric['dri_name'] }}{% endif %}</span>
+          </td>
+          {# The evidence, on the same row as the box you are typing into. #}
+          <td class="r ev dim">{{ r.prev_baseline_display }}</td>
+          <td class="r ev">{{ r.prev_actual_display }}
+            {%- if r.prev_delta_pct is not none %}
+            <span class="{{ 'up' if r.prev_delta_pct >= 0 else 'down' }}">
+              {{- '+' if r.prev_delta_pct > 0 }}{{ r.prev_delta_pct }}%</span>{% endif %}</td>
+          <td class="r ev dim">
+            {%- if r.scored_weeks %}{{ r.hit_weeks }} / {{ r.scored_weeks }} wks
+            {%- else %}&ndash;{% endif %}</td>
+          <td class="r">
+            <input type="text" inputmode="decimal" autocomplete="off"
+                   name="b:{{ r.metric['id'] }}" data-tg-baseline
+                   value="{{ '%g'|format(r.baseline) if r.baseline is not none else '' }}"
+                   aria-label="{{ r.metric['name'] }} baseline"></td>
+          <td class="r">
+            <input type="text" inputmode="decimal" autocomplete="off"
+                   name="s:{{ r.metric['id'] }}" data-tg-stretch
+                   value="{{ '%g'|format(r.stretch) if r.stretch is not none else '' }}"
+                   aria-label="{{ r.metric['name'] }} stretch"></td>
+          <td class="tg-quick">
+            {# Most targets are a nudge on the previous one; make that one click. #}
+            {% if r.prev_actual is not none %}
+            <button type="button" class="tg-q" data-tg-fill="{{ '%g'|format(r.prev_actual) }}"
+                    title="Use last quarter's actual as the baseline">Match</button>
+            <button type="button" class="tg-q" data-tg-bump="1.1"
+                    title="Raise the baseline 10%">+10%</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="tg-actions">
+    <button class="btn" type="submit">Save targets</button>
+    <span class="note">Only changed rows are written. Leave both boxes blank to
+      leave a metric unscored.</span>
+  </div>
   </form>
-  {% if missing %}<div class="flash warn">{{ missing }} numeric metric(s) have no target for Q{{ quarter }} {{ year }}. They show values without color until set.</div>{% endif %}
-  <table class="list">
-    <tr><th>Metric</th><th>DRI</th><th>Section</th><th>Unit</th><th>Baseline (W1-6)</th><th>Stretch (W7+)</th><th></th></tr>
-    {% for row in rows %}
-    <tr>
-      <td>{{ row.m['name'] }}</td>
-      <td class="note">{{ row.m['dri_name'] or '-' }}</td>
-      <td class="note">{{ row.m['section_name'] }}</td>
-      <td class="note">{{ row.m['unit'] or '-' }}</td>
-      <form method="post" action="/admin/targets/{{ row.m['id'] }}?year={{ year }}&quarter={{ quarter }}">
-      <td><input type="number" step="any" name="baseline" value="{{ row.t['baseline_value'] if row.t else '' }}" style="width:110px" required></td>
-      <td><input type="number" step="any" name="stretch" value="{{ row.t['stretch_value'] if row.t else '' }}" style="width:110px" required></td>
-      <td><button class="btn sm">Save</button></td>
-      </form>
-    </tr>
-    {% endfor %}
-  </table>
+  {% endif %}
 </div>
+
+<script>
+(function () {
+  /* Quick actions fill the boxes; nothing is written until Save. Stretch
+     follows baseline by the same ratio the row already had, so a deliberate
+     gap between the two is not silently flattened. */
+  var form = document.getElementById("tg-form");
+  if (!form) return;
+  form.addEventListener("click", function (e) {
+    var b = e.target.closest(".tg-q");
+    if (!b) return;
+    var row = b.closest("tr");
+    var base = row.querySelector("[data-tg-baseline]");
+    var str = row.querySelector("[data-tg-stretch]");
+    var old = parseFloat(base.value);
+    var ratio = (old > 0 && parseFloat(str.value) > 0) ? parseFloat(str.value) / old : 1.25;
+    var next = b.dataset.tgFill !== undefined
+      ? parseFloat(b.dataset.tgFill)
+      : (old > 0 ? old * parseFloat(b.dataset.tgBump) : NaN);
+    if (!isFinite(next)) return;
+    base.value = String(Math.round(next * 100) / 100);
+    str.value = String(Math.round(next * ratio * 100) / 100);
+    base.focus();
+  });
+})();
+</script>
 {% endblock %}

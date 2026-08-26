@@ -1,6 +1,6 @@
 {% macro cell_td(row, cell, editable, last_closed) %}
 <td id="cell-{{ row.metric_id }}-{{ cell.week.isoformat() }}"
-    class="cell {% if cell.week >= last_closed %}hot{% endif %} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
+    class="cell {% if cell.week >= last_closed %}hot{% endif %} {% if cell.week == last_closed %}due-week{% endif %} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
     {% if editable and cell.editable %}
     hx-get="/cell/{{ row.metric_id }}/{{ cell.week.isoformat() }}/edit"
     hx-target="this" hx-swap="outerHTML"

@@ -1,19 +1,20 @@
 {% extends "base.html" %}
-{% from "_grid_table.html" import grid_tables %}
-{% from "_summary.html" import summary_strip %}
+{% from "_grid_table.html" import grid_tables, grid_filters %}
+{% from "_lede.html" import lede %}
 {% block title %}Scorecard{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="eyebrow">{{ vm.quarter_label }} &middot; week of {{ vm.current_week.strftime('%B %-d, %Y') }}{% if demo_on %} &middot; demo data{% endif %}</div>
-  <h1>Company Scorecard</h1>
-  <p class="page-sub">
-    {% if demo_on %}Demo data is on: this board shows a fictional company. Edits change only the throwaway demo copy &mdash; your real scorecard is untouched. Turn it off under Admin &rarr; Settings.
-    {% elif can_edit %}Tap a cell to enter this week's number. Last week is due Monday EOD; missing cells go gray Wednesday 8am and ping Slack.
-    {% else %}Read-only view.{% endif %}
-  </p>
+  <h1>Company Scorecard{% if not can_edit %}<span class="ro-chip">Read-only view</span>{% endif %}</h1>
+  {% if demo_on %}
+  <p class="page-sub">Demo data is on: this board shows a fictional company. Edits change
+    only the throwaway demo copy &mdash; your real scorecard is untouched. Turn it off
+    under Admin &rarr; Settings.</p>
+  {% endif %}
 </div>
-{{ summary_strip(vm) }}
-{{ grid_tables(vm, editable=can_edit) }}
+{{ lede(vm, actions) }}
+{{ grid_filters(vm) }}
+{{ grid_tables(vm, editable=can_edit, actor_id=actor_id) }}
 {% endblock %}
 {% block fab %}
 {% from "_icons.html" import icon %}

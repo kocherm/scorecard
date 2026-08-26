@@ -1,0 +1,69 @@
+{# The board's first two layers.
+
+   Layer 1 is a sentence, not a row of counters: five boxes reading 3/2/1/4 and
+   a legend made the reader do the counting AND the interpreting, and buried
+   the one line that matters - who is red, who never reported - at 10.5px
+   inside the fifth box.
+
+   Layer 2 is "Act on this", the TV's own view (_view_act.html) brought into
+   the app. Same ActionItem list, same order; here each card carries the button
+   the TV cannot offer. #}
+
+{% macro lede(vm, actions) %}
+{% set s = vm.summary %}
+{% set total = s.green + s.yellow + s.red + s.stale + s.pending + s.other %}
+<div class="lede">
+  {% set unfiled = actions | selectattr('kind', 'equalto', 'red')
+                            | rejectattr('has_131') | list | length %}
+  <p class="lede-line">
+    {%- if not total %}Week of {{ vm.last_closed.strftime('%b %-d') }}: nothing on the
+      board yet.
+    {%- else %}Week of {{ vm.last_closed.strftime('%b %-d') }}:
+      <b class="on">{{ s.green }} of {{ total }}</b> on target
+      {%- if s.stale %}, <b class="gone">{{ s.stale }}</b>
+        never came in{% endif %}
+      {%- if s.pending %}, <b class="wait">{{ s.pending }}</b>
+        still due{% endif %}.
+      {#- Escalation is a SEPARATE axis, kept in its own sentence: a red streak
+          survives a missing week on purpose (scoring.consecutive_red_weeks
+          skips stale and pending, so nobody dodges a 1-3-1 by not reporting),
+          which means a metric can be counted both as "never came in" and as
+          needing a 1-3-1. Adding the two clauses together would print a total
+          larger than the number of metrics on the board. -#}
+      {%- if unfiled %} <b class="bad">{{ unfiled }}</b>
+        need{{ 's' if unfiled == 1 }} a 1-3-1.
+      {%- elif s.red %} <b class="bad">{{ s.red }}</b>
+        red, every 1-3-1 filed.
+      {%- elif not s.stale and not s.pending %} Nothing needs a decision today.
+      {%- endif %}
+    {%- endif %}
+  </p>
+</div>
+
+{% if actions %}
+<section class="acts" aria-label="Act on this">
+  <h2 class="acts-label">Act on this</h2>
+  <div class="acts-grid">
+    {% for a in actions %}
+    <article class="act {{ a.kind }}">
+      <div class="act-badge">{{ a.badge }}</div>
+      <h3 class="act-name"><a href="/m/{{ a.metric_id }}">{{ a.name }}</a></h3>
+      <div class="act-num">
+        {{ a.value_display }}{% if a.target_display != '-' %}<small>vs {{ a.target_display }}</small>{% endif %}
+      </div>
+      <div class="act-foot">
+        <span class="act-who">
+          {%- if a.initials %}<i class="av">{{ a.initials }}</i>{% endif %}{{ a.dri_name }}
+        </span>
+        {% if a.kind == 'red' %}
+        <a class="act-do" href="/131/{{ a.metric_id }}/{{ a.week }}">{{ 'Review 1-3-1' if a.has_131 else 'File 1-3-1' }} &rarr;</a>
+        {% else %}
+        <span class="act-step">{{ a.next_step }}</span>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endmacro %}

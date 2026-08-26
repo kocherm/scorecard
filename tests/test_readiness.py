@@ -343,14 +343,14 @@ def test_saving_a_bot_token_says_which_workspace_it_reached(env, slack):
     env.post("/admin/settings/slack",
              data={"slack_bot_token": "xoxb-new", "slack_channel_id": "C123",
                    "slack_signing_secret": "s3cr3t"})
-    page = env.get("/admin/settings?saved=slack").text
+    page = env.get("/admin/settings?tab=notify&saved=slack").text
     assert "Workspace Northwind, bot @scorecard." in page
 
 
 def test_a_rejected_token_does_not_look_like_a_successful_save(env, slack):
     slack.responses["auth.test"] = {"ok": False, "error": "invalid_auth"}
     env.post("/admin/settings/slack", data={"slack_bot_token": "xoxb-wrong"})
-    page = env.get("/admin/settings?saved=slack").text
+    page = env.get("/admin/settings?tab=notify&saved=slack").text
     assert "Saved, but Slack did not accept it." in page
     assert "invalid_auth" in page
     # A failure must not fade off the screen the way a success does.

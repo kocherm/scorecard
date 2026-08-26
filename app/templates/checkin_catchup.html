@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Catch up{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="eyebrow"><a href="/checkin">My numbers</a> &middot; {{ vm.quarter_label }}</div>
+  <h1>Catch up</h1>
+  <p class="page-sub">Weeks across, metrics down. Fill in what you have and save once
+    &mdash; blanks stay blank, and every change is kept in the audit trail.</p>
+</div>
+
+{% if not items %}
+<div class="panel" style="max-width:640px">
+  <p class="note">Nothing to catch up on: every earlier week in the display window has a
+    number. <a href="/checkin">Back to my numbers</a>.</p>
+</div>
+{% else %}
+<form method="post" action="/checkin/catch-up">
+<div class="panel cu-panel">
+  <div class="cu-wrap">
+    <table class="cu">
+      <thead>
+        <tr>
+          <th class="cu-metric">Metric</th>
+          {% for w in weeks %}
+          <th class="cu-wk"><b>{{ w.strftime('%b %-d') }}</b><span>{{ w | qlabel }}</span></th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        {% set row = item.row %}
+        <tr>
+          <td class="cu-metric">
+            <span class="dot {{ row.last_state }}" aria-hidden="true"></span>
+            <span class="cu-nm">{{ row.name }}</span>
+            <span class="cu-sec">{{ item.section }}</span>
+          </td>
+          {% for w in weeks %}
+          {% set cell = cells.get((row.metric_id, w)) %}
+          <td class="cu-cell {{ 'gap' if cell and cell.raw is none }}">
+            {% if cell %}
+              {# The value as rendered rides along so the server can tell an
+                 untouched field from a real edit and skip the no-op write. #}
+              <input type="hidden" name="o:{{ row.metric_id }}:{{ w.isoformat() }}"
+                     value="{{ cell.display }}">
+              {% if row.metric_type == 'status' %}
+              <select name="v:{{ row.metric_id }}:{{ w.isoformat() }}"
+                      aria-label="{{ row.name }}, week of {{ w.strftime('%b %-d') }}">
+                <option value=""{% if cell.raw is none %} selected{% endif %}>&ndash;</option>
+                {% for v in ['G', 'Y', 'R'] %}
+                <option value="{{ v }}"{% if cell.raw == v %} selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+              </select>
+              {% elif row.metric_type == 'binary' %}
+              <select name="v:{{ row.metric_id }}:{{ w.isoformat() }}"
+                      aria-label="{{ row.name }}, week of {{ w.strftime('%b %-d') }}">
+                <option value=""{% if cell.raw is none %} selected{% endif %}>&ndash;</option>
+                <option value="1"{% if cell.raw == 1 %} selected{% endif %}>Yes</option>
+                <option value="0"{% if cell.raw == 0 %} selected{% endif %}>No</option>
+              </select>
+              {% else %}
+              <input type="text" inputmode="decimal" autocomplete="off"
+                     name="v:{{ row.metric_id }}:{{ w.isoformat() }}"
+                     value="{{ cell.display }}" placeholder="{{ '&ndash;'|safe }}"
+                     aria-label="{{ row.name }}, week of {{ w.strftime('%b %-d') }}">
+              {% endif %}
+            {% else %}
+              <span class="cu-na" title="Before this metric started, or after it was archived">&middot;</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="cu-actions">
+    <button class="btn" type="submit">Save changes</button>
+    <a class="btn secondary" href="/checkin">Cancel</a>
+    <span class="note cu-count">{{ prog.gaps }} blank{{ '' if prog.gaps == 1 else 's' }}
+      across {{ items|length }} metric{{ '' if items|length == 1 else 's' }}</span>
+  </div>
+</div>
+</form>
+{% endif %}
+{% endblock %}

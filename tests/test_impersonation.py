@@ -48,13 +48,13 @@ def test_admin_views_as_editor_and_back(env):
 
     r = client.get("/")
     assert "Viewing as" in r.text and "Eddie Editor" in r.text and "Boss" in r.text
-    assert "/admin/settings" not in r.text          # admin nav gone
+    assert "<span>Admin</span>" not in r.text       # admin nav gone
     assert client.get("/admin/users").status_code == 403  # effective role enforced
 
     r = client.post("/impersonate/stop")
     assert r.status_code == 200  # followed to /admin/users
     r = client.get("/")
-    assert "Viewing as" not in r.text and "/admin/settings" in r.text
+    assert "Viewing as" not in r.text and "<span>Admin</span>" in r.text
 
 
 def test_writes_while_impersonating_audit_the_real_admin(env):
@@ -96,7 +96,7 @@ def test_deactivated_target_falls_back_to_admin(env):
     with dbm.get_db() as con:
         con.execute("UPDATE users SET is_active = 0 WHERE id = 2")
     r = client.get("/")
-    assert "Viewing as" not in r.text and "/admin/settings" in r.text
+    assert "Viewing as" not in r.text and "<span>Admin</span>" in r.text
 
 
 def test_inactive_target_404s(env):

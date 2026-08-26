@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app import auth
 from app import db as dbm
 from app import readiness
+from app.main import SETTINGS_TABS
 
 
 @pytest.fixture
@@ -41,10 +42,11 @@ def test_save_returns_to_the_panel_and_confirms(client):
                     data={"public_base_url": "https://score.example.com/",
                           "nudge_preset": "mon_tue"}, follow_redirects=False)
     assert r.status_code == 303
-    # Anchor so the browser restores position; query param so the page can say so.
-    assert r.headers["location"] == "/admin/settings?saved=nudges#nudges"
+    # Anchor so the browser restores position, query param so the page can say
+    # so, tab because the anchor cannot land on a panel that is not rendered.
+    assert r.headers["location"] == "/admin/settings?tab=notify&saved=nudges#nudges"
 
-    page = client.get("/admin/settings?saved=nudges").text
+    page = client.get("/admin/settings?tab=notify&saved=nudges").text
     assert 'id="nudges"' in page
     assert page.count("Saved.") == 1, "only the panel that was saved says so"
 
@@ -64,7 +66,10 @@ def test_save_returns_to_the_panel_and_confirms(client):
 def test_every_settings_post_anchors_back(client, path, data, anchor):
     r = client.post(path, data=data, follow_redirects=False)
     assert r.status_code == 303
-    assert r.headers["location"] == f"/admin/settings?saved={anchor}#{anchor}"
+    tab = SETTINGS_TABS[anchor]
+    assert r.headers["location"] == f"/admin/settings?tab={tab}&saved={anchor}#{anchor}"
+    # And the panel it points at is actually on that tab.
+    assert f'id="{anchor}"' in client.get(f"/admin/settings?tab={tab}").text
 
 
 def test_public_base_url_actually_persists(client):
@@ -77,15 +82,32 @@ def test_public_base_url_actually_persists(client):
 
 
 def test_the_warning_shows_only_while_it_is_unset(client):
-    assert "Nudges are <strong>off</strong>" in client.get("/admin/settings").text
+    notify = "/admin/settings?tab=notify"
+    assert "Nudges are <strong>off</strong>" in client.get(notify).text
     client.post("/admin/settings/nudges",
                 data={"public_base_url": "https://score.example.com",
                       "nudge_preset": "mon_tue"})
-    assert "Nudges are <strong>off</strong>" not in client.get("/admin/settings").text
+    assert "Nudges are <strong>off</strong>" not in client.get(notify).text
 
 
-def test_a_plain_page_load_confirms_nothing(client):
-    assert "Saved." not in client.get("/admin/settings").text
+@pytest.mark.parametrize("tab", ["display", "notify", "advanced"])
+def test_a_plain_page_load_confirms_nothing(client, tab):
+    assert "Saved." not in client.get(f"/admin/settings?tab={tab}").text
+
+
+def test_every_panel_lives_on_exactly_one_tab(client):
+    """A panel rendered under no tab is unreachable; one rendered under two
+    would take a "Saved." flash it did not earn."""
+    pages = {t: client.get(f"/admin/settings?tab={t}").text
+             for t in ("display", "notify", "advanced")}
+    for panel, tab in SETTINGS_TABS.items():
+        on = [t for t, body in pages.items() if f'id="{panel}"' in body]
+        assert on == [tab], f"{panel} rendered on {on}, expected [{tab}]"
+
+
+def test_an_unknown_tab_falls_back_rather_than_rendering_nothing(client):
+    body = client.get("/admin/settings?tab=nonsense").text
+    assert 'id="tv-display"' in body
 
 
 def test_more_channels_actually_saves(client):
