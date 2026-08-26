@@ -366,6 +366,144 @@ td.pin.actual { font-weight: 600; color: var(--navy); font-size: 13px; }
   font-size: 11px; padding: 4px 8px; cursor: pointer; font-family: inherit;
 }
 
+/* ---------- the board's pencil + quick editor ----------
+   Clicking a cell has always opened an editor; nothing said so, and a 50px
+   cell is not a touch target. The pencil states the affordance and gives it
+   somewhere to be pressed. It lives in the metric column, which is sticky, so
+   it stays on screen however far the weeks are scrolled sideways. */
+.mpen {
+  margin-left: auto; flex: none; padding: 0;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: none; color: var(--mist); cursor: pointer;
+  font-family: inherit;
+  transition: opacity 120ms var(--ease), color 120ms var(--ease);
+  opacity: 0;
+}
+.mpen svg { width: 14px; height: 14px; }
+tbody tr:hover .mpen { opacity: 1; }
+.mpen:hover { color: var(--accent); border-color: var(--cloud); background: #fff; }
+.mpen:focus-visible {
+  opacity: 1; color: var(--accent);
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+/* A control that only appears on hover is a control a phone never shows, and
+   the phone is where "I am on a call, add one" actually happens. */
+@media (hover: none) {
+  .mpen { opacity: 1; width: 34px; height: 34px; color: var(--slate); }
+  .mpen svg { width: 16px; height: 16px; }
+}
+
+dialog.qe {
+  border: none; padding: 0; width: 380px; max-width: calc(100vw - 32px);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-floating);
+  font-family: "Poppins", sans-serif; color: var(--ink);
+  background: #fff;
+}
+dialog.qe::backdrop { background: rgba(15,26,46,0.45); }
+.qe-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 18px 20px 12px; border-bottom: 1px solid var(--pearl);
+}
+.qe-titles { flex: 1; min-width: 0; }
+.qe-eyebrow {
+  font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--silver);
+}
+.qe-title { margin: 2px 0 0; font-size: 17px; font-weight: 600; color: var(--navy); }
+.qe-x {
+  flex: none; border: none; background: none; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--mist);
+  padding: 2px 6px; border-radius: var(--radius-sm); font-family: inherit;
+}
+.qe-x:hover { color: var(--ink); background: var(--ivory); }
+
+.qe-week {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 20px; background: var(--ivory); border-bottom: 1px solid var(--pearl);
+  font-size: 12px; color: var(--slate);
+}
+.qe-week label { font-weight: 500; }
+.qe-week select {
+  flex: 1; min-width: 0; padding: 5px 8px; font: inherit; font-size: 12.5px;
+  border: 1px solid var(--cloud); border-radius: var(--radius-sm); background: #fff;
+}
+.qe-week select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qe-target { flex: none; font-size: 11.5px; color: var(--silver); white-space: nowrap; }
+
+.qe-err {
+  margin: 0; padding: 10px 20px; font-size: 12.5px;
+  background: var(--red-subtle); color: var(--red-deep);
+}
+.qe-body { margin: 0; padding: 18px 20px 6px; }
+
+/* The number, sized to be read and pressed rather than squinted at. */
+.qe-num { display: flex; align-items: center; gap: 10px; }
+.qe-num input {
+  flex: 1; min-width: 0; text-align: center;
+  padding: 10px 8px; font: inherit; font-size: 24px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--navy);
+  border: 1px solid var(--cloud); border-radius: var(--radius-md); background: #fff;
+}
+.qe-num input:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+/* Spinners would put a second, 12px-tall pair of steppers next to these. */
+.qe-num input::-webkit-outer-spin-button,
+.qe-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qe-num input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.qe-step {
+  flex: none; width: 46px; height: 46px; border-radius: var(--radius-md);
+  border: 1px solid var(--cloud); background: #fff; color: var(--navy);
+  font: inherit; font-size: 20px; font-weight: 500; line-height: 1; cursor: pointer;
+}
+.qe-step:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-subtle); }
+.qe-step:active { background: var(--accent-muted); }
+.qe-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qe-hint { margin: 8px 0 0; font-size: 11.5px; color: var(--silver); }
+
+/* Status and binary: the tap IS the answer, so every option is a submit. */
+.qe-choice { display: flex; gap: 8px; }
+.qe-opt {
+  flex: 1; padding: 12px 6px; border-radius: var(--radius-md);
+  border: 1px solid var(--cloud); background: #fff; color: var(--slate);
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.qe-opt:hover { border-color: var(--slate); color: var(--ink); }
+.qe-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qe-opt.g.sel { background: var(--green); border-color: var(--green); color: #fff; }
+.qe-opt.y.sel { background: var(--amber); border-color: var(--amber); color: #fff; }
+.qe-opt.r.sel { background: var(--red); border-color: var(--red); color: #fff; }
+
+.qe-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 16px 0 14px; margin-top: 4px;
+}
+/* Whose number this is, said out loud: an admin bumping someone else's metric
+   on a call should see the name before Save, not discover it in Activity. */
+.qe-who {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--slate);
+}
+.qe-who .av {
+  width: 18px; height: 18px; border-radius: 999px; flex: none;
+  background: var(--navy); color: #fff;
+  font-size: 8.5px; font-weight: 600; font-style: normal;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.qe-who .unowned { color: var(--red-deep); font-weight: 500; }
+.qe-warn {
+  margin: 0; padding: 10px 20px; font-size: 11.5px; line-height: 1.5;
+  background: var(--amber-subtle); color: var(--amber-deep);
+}
+.qe-warn a { color: inherit; font-weight: 600; }
+.qe-more {
+  display: block; padding: 11px 20px; border-top: 1px solid var(--pearl);
+  font-size: 12px; font-weight: 500; color: var(--slate); text-decoration: none;
+}
+.qe-more:hover { color: var(--accent); background: var(--ivory); }
+
 /* ---------- forms / admin ---------- */
 .panel { background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); padding: 20px 22px; margin-bottom: 20px; }
 .panel h2 { font-size: 17px; color: var(--navy); margin: 0 0 12px; font-weight: 600; }
@@ -1415,4 +1553,41 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
      for the panel's default width if it never runs. */
   transform: scale(var(--tvprev-scale, 0.3));
   pointer-events: none;
+}
+
+/* ---------- phone: the rail collapses to icons ----------
+   Not cosmetic. The rail is 196px fixed and .page reserves 220px for it at
+   every width, so on a 414px phone the board got ~170px of content and the
+   whole page scrolled sideways - which makes "open the board and fix the
+   number" something you cannot actually do from a phone, and the pencil above
+   exists precisely for the person doing it from a phone. Icons only, labels
+   dropped, badges become a corner dot; nothing is removed, so every
+   destination is still one tap away.
+
+   It lives at the END of this file on purpose. It overrides base rules
+   declared much further down (.status-body's min-width:0 among them), and
+   at equal specificity the later rule wins - sitting this block up with
+   the components it adjusts looks tidier and silently loses.  */
+@media (max-width: 760px) {
+  .sidenav { width: 52px; padding: 12px 6px; }
+  .sidenav .logo { justify-content: center; padding: 4px 0; margin-bottom: 12px; }
+  .sidenav .logo span,
+  .nav-group,
+  .sidenav .nav-item > span:not(.nav-badge) { display: none; }
+  .sidenav .nav-item { justify-content: center; padding: 10px 0; position: relative; }
+  /* The count has no label to sit beside any more, so it rides the icon. */
+  .sidenav .nav-badge {
+    position: absolute; top: 4px; right: 4px;
+    min-width: 15px; padding: 0 4px; font-size: 9.5px; line-height: 15px;
+  }
+  .page { padding: 16px 14px 24px 66px; }
+  /* The board is the reason to be here on a phone; the summary above it can
+     stack instead of demanding two columns. */
+  .acts-grid { grid-template-columns: 1fr; }
+  .fab { right: 14px; bottom: 14px; width: 42px; height: 42px; }
+  /* Setup & status is where /admin lands. Its fix button is wider than the
+     sentence saying why you need it, so at this width the button takes its
+     own line instead of squeezing the explanation to one word per line. */
+  .status-row { flex-wrap: wrap; }
+  .status-body { min-width: 55%; }
 }

@@ -1,0 +1,102 @@
+{# The board's quick editor: one metric, one week, one number.
+
+   Deliberately NOT a metric editor. Renaming a metric, moving its owner or
+   setting a target are quarterly jobs with their own admin screens; the thing
+   people open the board to change - and cannot, without knowing that a bare
+   table cell is clickable - is the number. Everything here serves one write.
+
+   It opens on the DUE week because that is the column the board itself
+   emphasises and the one /checkin defaults to: the common job is "last week's
+   actual", and the picker covers the rest. #}
+<dialog class="qe" id="qe-dlg" aria-labelledby="qe-title">
+  <div class="qe-head">
+    <div class="qe-titles">
+      <div class="qe-eyebrow">{{ m.section }}</div>
+      <h2 class="qe-title" id="qe-title">{{ m.name }}</h2>
+    </div>
+    <button type="button" class="qe-x" onclick="qeClose()" aria-label="Close">&times;</button>
+  </div>
+
+  {# Outside the form on purpose: a GET that carries only its own name/value,
+     so switching weeks re-renders the dialog for that week instead of
+     submitting a half-typed number to the wrong one. #}
+  <div class="qe-week">
+    <label for="qe-week-sel">Week</label>
+    <select id="qe-week-sel" name="week"
+            hx-get="/quick/{{ m.metric_id }}"
+            hx-target="#quickedit" hx-swap="innerHTML" hx-trigger="change">
+      {% for p in points %}
+      <option value="{{ p.week.isoformat() }}" {% if p.week == sel.week %}selected{% endif %}>
+        {{ p.date_label }} &middot; {{ p.label }}
+        {%- if p.week == m.last_closed %} (due){% elif p.is_current %} (this week){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <span class="qe-target">
+      {%- if sel.target_display != '-' %}target {{ sel.target_display }}
+      {%- else %}no target set{% endif %}</span>
+  </div>
+
+  {% if err %}<div class="qe-err" role="alert">{{ err }}</div>{% endif %}
+
+  {# A save replies entirely out of band - the row, the lede, and an empty
+     #quickedit that takes the dialog off screen. An ERROR replies with this
+     dialog again, so the form still names #quickedit as its target for that
+     case. #}
+  <form class="qe-body" hx-post="/quick/{{ m.metric_id }}/{{ sel.week.isoformat() }}"
+        hx-target="#quickedit" hx-swap="innerHTML">
+    {% if m.metric_type == 'status' %}
+    {# One tap, one write: three submit buttons rather than a select plus Save.
+       A status has three possible values, so the fastest correct thing is to
+       show all three and let the tap be the answer. #}
+    <div class="qe-choice">
+      {% for code, label in [('G', 'Green'), ('Y', 'Yellow'), ('R', 'Red')] %}
+      <button class="qe-opt {{ code|lower }} {% if sel.raw == code %}sel{% endif %}"
+              type="submit" name="value" value="{{ code }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+    {% elif m.metric_type == 'binary' %}
+    <div class="qe-choice">
+      <button class="qe-opt g {% if sel.raw == 1 %}sel{% endif %}"
+              type="submit" name="value" value="1">Yes</button>
+      <button class="qe-opt r {% if sel.raw == 0 %}sel{% endif %}"
+              type="submit" name="value" value="0">No</button>
+    </div>
+    {% else %}
+    <div class="qe-num">
+      <button type="button" class="qe-step" onclick="qeStep(-{{ step }})"
+              aria-label="Down {{ step }}">&minus;</button>
+      <input type="number" step="any" id="qe-value" name="value"
+             value="{{ value if value is not none else sel.raw | plain }}"
+             inputmode="decimal" autocomplete="off" autofocus
+             aria-label="Value for week of {{ sel.date_label }}">
+      <button type="button" class="qe-step" onclick="qeStep({{ step }})"
+              aria-label="Up {{ step }}">+</button>
+    </div>
+    <p class="qe-hint">
+      {%- if sel.raw is not none %}Currently {{ sel.display }}. Empty the field to clear it.
+      {%- else %}Nothing entered for this week yet.{% endif %}</p>
+    {% endif %}
+
+    <div class="qe-foot">
+      <span class="qe-who">
+        {%- if m.dri_name != '-' %}<i class="av">{{ m.dri_name | initials }}</i>{{ m.dri_name }} owns this
+        {%- else %}<span class="unowned">no owner</span>{% endif %}</span>
+      <button type="button" class="btn secondary sm" onclick="qeClose()">Cancel</button>
+      {% if m.metric_type == 'numeric' %}<button class="btn sm" type="submit">Save</button>{% endif %}
+    </div>
+  </form>
+
+  {# The one failure this app cannot show you any other way: an automation
+     upserts an ABSOLUTE value, so a number corrected by hand on Tuesday is
+     gone by Wednesday morning with nothing in the UI saying why. Better to
+     say so before the edit than to leave someone re-typing it every day. #}
+  {% if api_written %}
+  <p class="qe-warn">An automation writes this metric through the API. A number
+    entered here is replaced the next time it runs &mdash;
+    <a href="/m/{{ m.metric_id }}">see who writes it</a>.</p>
+  {% endif %}
+
+  <a class="qe-more" href="/m/{{ m.metric_id }}">Open the full metric &rarr;</a>
+</dialog>
+<script>qeOpen()</script>

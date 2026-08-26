@@ -145,6 +145,31 @@ Slack app manifest). Check `git grep` before every commit.
   current one, /checkin/catch-up for older), and only for the DRI, since
   /checkin only lists metrics you own.
 
+- The BOARD is writable, and says so. Every row carries a pencil in the metric
+  column (sticky, so it survives the horizontal scroll) which opens a <dialog>
+  quick editor: one metric, one week, one number, defaulting to the DUE week
+  and with - / + for the "someone rang, that is one more" case. Clicking a cell
+  has always opened an inline editor, but nothing on the page said so and a
+  50px cell is not a touch target, so the number people came to the board to
+  change was the one thing the board did not offer. It is deliberately NOT a
+  metric editor - renaming, re-owning and re-targeting are quarterly jobs with
+  their own admin screens. Two rules: the - / + buttons move the FIELD and
+  leave saving to Save, because every write lands in entry_audit and four taps
+  must not be four rows of history; and a bad value re-renders the DIALOG with
+  the message rather than returning 422, because htmx does not swap a 4xx, so
+  an error status is a Save button that silently does nothing.
+- A write from the board answers with EVERYTHING that number changed, and the
+  shape of that response is load-bearing (main._render_row). The unit is the
+  ROW, not the cell - state dot, month subtotal, Actual, sparkline and the
+  1-3-1 badge are sibling cells - plus the lede and "Act on this" above the
+  grid, which are the same rows added up. Returning only the cell left five
+  other numbers reading yesterday's answer, and left "0 of 5 on target" over a
+  green row. Everything is hx-swap-oob and both callers swap "none". The order
+  is not cosmetic: htmx picks its fragment parser from the response's FIRST tag
+  (makeFragment), so leading with <tr> wraps the body in <table><tbody> and the
+  HTML parser silently drops the lede <div> - no error, the swap just never
+  happens. The div goes first and the row travels inside its own <table>.
+  htmx's OOB scan is a deep querySelectorAll, so that nesting is fine.
 - Navigation groups by CADENCE, not by route: the rail holds Board, My numbers
   and a single Admin entry; the seven admin screens live in base.html's
   `admin_pages` list and render as a second-level .subnav on admin pages only.
@@ -197,6 +222,13 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
   deliberate: it makes a re-run idempotent and lets a missed run self-heal, but
   it means "last writer wins" and the automation usually writes last.
 
+- The left rail is fixed at 196px and .page reserves 220px for it, so until
+  the max-width:760px block existed a 414px phone got ~170px of content and the
+  board scrolled sideways as a whole page. That is why the rail collapses to a
+  52px icon strip there rather than being a styling nicety: "open the board and
+  fix the number" has to be doable from a phone, which is where the pencil is
+  for. Anything hover-only needs a (hover: none) branch for the same reason - a
+  control that appears on hover is a control a phone never shows.
 - migrate/seed_data.local.json is required to seed; copy from seed_data.example.json.
 - Passwords/tokens are hashed in DB; temp passwords and API tokens print exactly once.
 - Styling: CSS custom properties in app/static/scorecard.css only - no new hex

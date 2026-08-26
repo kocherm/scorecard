@@ -50,6 +50,9 @@ templates.env.filters["qlabel"] = lambda w: wk.quarter_label(
 # Owner initials, the same way the TV derives them - one rule, so a person is
 # not "MK" on the board and "M" on the television.
 templates.env.filters["initials"] = gridm._initials
+# A number the way it must appear inside an <input type=number>: no $,
+# no thousands separators, and no 5.0 where a person typed 5.
+templates.env.filters["plain"] = gridm.plain_value
 # Cache-buster: changes whenever any hand-written static asset does, so a
 # browser never serves a stale scorecard.css or passkey.js after a deploy.
 templates.env.globals["static_v"] = str(int(max(
@@ -581,21 +584,40 @@ def _metric_or_404(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
     return m
 
 
-def _render_cell(request: Request, con: sqlite3.Connection, metric_id: int,
-                 week: date) -> HTMLResponse:
-    """Re-render a single cell after an edit (htmx swap)."""
+def _render_row(request: Request, con: sqlite3.Connection, user: sqlite3.Row,
+                metric_id: int) -> HTMLResponse:
+    """Everything one saved number changes, in one out-of-band response.
+
+    The ROW, not the cell: a number moves the state dot, the month subtotal,
+    Actual, the sparkline and whether a 1-3-1 is due, all of which are sibling
+    cells of the same <tr>. And the lede with it - "0 of 5 on target" and an
+    "Act on this" card offering to file a 1-3-1 are the rows added up, so
+    leaving them behind puts a sentence on screen that the green row directly
+    under it contradicts.
+
+    The SHAPE is load-bearing and easy to break. htmx picks its fragment parser
+    from the response's first tag (makeFragment): lead with <tr> and it wraps
+    the whole body in <table><tbody>, and the HTML parser silently drops any
+    <div> sibling - the lede swap goes missing with no error anywhere. So the
+    div comes first, which selects the generic parser, and the row travels
+    inside its own <table> so it survives that parser in turn. Every piece is
+    hx-swap-oob (htmx's OOB scan is a deep querySelectorAll, so nesting is
+    fine) and the callers swap "none", because the leftover empty <table>
+    shell is not something any target wants."""
     vm = gridm.build_grid(con, datetime.now(timezone.utc))
-    for s in vm.sections:
-        for r in s.rows:
-            if r.metric_id == metric_id:
-                for c in r.cells:
-                    if c.week == week:
-                        html = templates.env.from_string(
-                            '{% from "_cell.html" import cell_td %}'
-                            '{{ cell_td(row, cell, true, last_closed) }}'
-                        ).render(row=r, cell=c, last_closed=vm.last_closed)
-                        return HTMLResponse(html)
-    raise HTTPException(404)
+    row = next((r for s in vm.sections for r in s.rows if r.metric_id == metric_id), None)
+    if row is None:
+        raise HTTPException(404)
+    html = templates.env.from_string(
+        '{% from "_grid_table.html" import metric_row %}'
+        '{% from "_lede.html" import lede %}'
+        '<div id="board-lede" hx-swap-oob="true">{{ lede(vm, actions) }}</div>'
+        '<div id="quickedit" hx-swap-oob="innerHTML"></div>'
+        '<table hidden><tbody>{{ metric_row(vm, row, true, actor_id, true) }}'
+        '</tbody></table>'
+    ).render(vm=vm, row=row, actor_id=_data_actor_id(con, user),
+             actions=gridm.build_actions(con, vm))
+    return HTMLResponse(html)
 
 
 @app.get("/cell/{metric_id}/{week}/edit", response_class=HTMLResponse)
@@ -626,7 +648,89 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
     except ValueError as e:
         raise HTTPException(422, str(e))
     con.commit()
-    return _render_cell(request, con, metric_id, w)
+    return _render_row(request, con, user, metric_id)
+
+
+# ------------------------------------------------- quick edit (board pencil)
+# How much one tap of - / + moves a numeric value. One, because the job this
+# exists for is "someone rang, that is one more": counts are what people carry
+# off a call. A metric measured in thousands is typed, not tapped, and the
+# field is right there.
+QUICK_STEP = 1
+
+
+def _quick_points(con: sqlite3.Connection, metric_id: int, now: datetime):
+    """(metric VM, the weeks its quick editor can write - newest first).
+
+    build_metric is reused rather than re-queried: it already scores a metric
+    week by week WITH the target each week was judged against, so the dialog
+    and /m/{id} cannot disagree about what a week was worth. Its default
+    quarter is the DUE week's, which is what guarantees the due week is on
+    offer. In the first week of a new quarter the CURRENT week falls in the
+    next one, so that quarter is fetched too - otherwise the one week most
+    likely to be edited from a phone would be the one the pencil could not
+    reach."""
+    mvm = gridm.build_metric(con, metric_id, now)
+    if mvm is None:
+        raise HTTPException(404)
+    points = list(mvm.points)
+    cur_q = wk.quarter_of(wk.current_week(now))
+    if cur_q != (mvm.year, mvm.quarter):
+        nxt = gridm.build_metric(con, metric_id, now, year=cur_q[0], quarter=cur_q[1])
+        if nxt is not None:
+            points += nxt.points
+    points = [p for p in points if p.editable]
+    points.reverse()
+    return mvm, points
+
+
+def _quick_render(request: Request, con: sqlite3.Connection, metric_id: int,
+                  week: str, *, err: Optional[str] = None,
+                  value: Optional[str] = None) -> HTMLResponse:
+    now = datetime.now(timezone.utc)
+    mvm, points = _quick_points(con, metric_id, now)
+    if not points:
+        raise HTTPException(422, "This metric has no week to enter yet")
+    sel = next((p for p in points if p.week == mvm.last_closed), points[0])
+    if week:
+        sel = next((p for p in points if p.week.isoformat() == week), sel)
+    last = con.execute(
+        "SELECT source FROM entry_audit WHERE metric_id = ? ORDER BY id DESC LIMIT 1",
+        (metric_id,)).fetchone()
+    return render(request, "_quick_edit.html", m=mvm, sel=sel, points=points,
+                  err=err, value=value, step=QUICK_STEP,
+                  api_written=bool(last and last["source"] == "api"))
+
+
+@app.get("/quick/{metric_id}", response_class=HTMLResponse)
+def quick_edit_form(metric_id: int, request: Request, week: str = "",
+                    user=Depends(require_editor),
+                    con: sqlite3.Connection = Depends(data_db_dep)):
+    return _quick_render(request, con, metric_id, week)
+
+
+@app.post("/quick/{metric_id}/{week}", response_class=HTMLResponse)
+def quick_edit_save(metric_id: int, week: str, request: Request,
+                    value: str = Form(""), user=Depends(require_editor),
+                    con: sqlite3.Connection = Depends(data_db_dep)):
+    """Save and swap the row behind the dialog out of band.
+
+    A bad number re-renders the DIALOG with the message rather than returning
+    422: htmx does not swap a 4xx, so the person typing "twelve" would see
+    nothing happen at all - the one outcome worse than an error."""
+    m = _metric_or_404(con, metric_id)
+    w = wk.parse_week(week)
+    if w > wk.current_week(datetime.now(timezone.utc)):
+        raise HTTPException(422, "Future week")
+    actor = _data_actor_id(con, _real_actor(request, user))
+    try:
+        entry_ops.save_value(con, m, w, value, source="manual", user_id=actor)
+    except ValueError as e:
+        return _quick_render(request, con, metric_id, week, err=str(e), value=value)
+    con.commit()
+    # Empty body for #quickedit (the dialog goes away) plus the refreshed row,
+    # which lands by id wherever it is on the board.
+    return _render_row(request, con, user, metric_id)
 
 
 # ---------------------------------------------------------------- my numbers

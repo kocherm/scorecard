@@ -12,9 +12,17 @@
     under Admin &rarr; Settings.</p>
   {% endif %}
 </div>
-{{ lede(vm, actions) }}
+{# The lede and "Act on this" are the same numbers as the rows, summed.
+   Wrapped so a save can swap them with the row it changed: entering the
+   number that takes a metric out of red must not leave a sentence saying
+   0 of 5 on target above a green row, or a "File 1-3-1" button for a
+   streak that just ended. #}
+<div id="board-lede">{{ lede(vm, actions) }}</div>
 {{ grid_filters(vm) }}
 {{ grid_tables(vm, editable=can_edit, actor_id=actor_id) }}
+{# Where the pencil's <dialog> lands. Page-level, not inside the scrolling
+   table, so showModal() puts it in the top layer over the whole board. #}
+{% if can_edit %}<div id="quickedit"></div>{% endif %}
 {% endblock %}
 {% block fab %}
 {% from "_icons.html" import icon %}

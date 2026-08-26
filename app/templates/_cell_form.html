@@ -1,6 +1,8 @@
 <td id="cell-{{ metric.id }}-{{ week }}" class="cell">
+  {# swap="none": the reply is entirely out of band (the row, the lede), and
+     this form is inside the row it replaces. #}
   <form class="cell-form" hx-post="/cell/{{ metric.id }}/{{ week }}"
-        hx-target="closest td" hx-swap="outerHTML">
+        hx-swap="none">
     {% if metric.metric_type == 'status' %}
       <select name="value" autofocus>
         <option value="G" {% if current == 'G' %}selected{% endif %}>G</option>

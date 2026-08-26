@@ -89,6 +89,19 @@ def fmt_value(metric_type: str, unit: Optional[str], value) -> str:
     return s
 
 
+def plain_value(value) -> str:
+    """A stored value as a person would TYPE it back: 5, not 5.0; 3.5 stays
+    3.5; a status stays its letter. fmt_value is for reading - it adds the $
+    and the thousands separators, which is exactly what a number input must
+    not be pre-filled with."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    v = float(value)
+    return str(int(v)) if v == int(v) else str(v)
+
+
 def _metric_info(m: sqlite3.Row) -> sc.MetricInfo:
     archived_week = None
     if m["archived_at"]:
