@@ -300,12 +300,13 @@ def test_every_kill_switch_leaves_a_record(env):
     with dbm.get_db() as con:
         dbm.set_setting(con, "alerts_enabled", "0")
     alerts.nudge_sweep("nudge1", NOW)
+    alerts.summary_sweep(NOW)
     alerts.stale_sweep(NOW)
     alerts.red_sweep(NOW)
     with dbm.get_db() as con:
         rows = {r["kind"]: r["detail"] for r in con.execute(
             "SELECT kind, detail FROM sweep_runs WHERE outcome = 'skipped'")}
-    assert set(rows) == {"nudge1", "stale", "red"}
+    assert set(rows) == {"nudge1", "summary", "stale", "red"}
     assert all("master switch" in d for d in rows.values())
 
 
@@ -321,7 +322,8 @@ def test_a_sweep_that_ran_records_what_it_sent(env, monkeypatch):
 def test_sweeps_with_no_run_yet_are_not_mistaken_for_healthy(bare):
     with dbm.get_db() as con:
         runs = readiness.sweep_runs(con, NOW)
-    assert {r["kind"] for r in runs} == {"nudge1", "nudge2", "stale", "red"}
+    assert {r["kind"] for r in runs} == {"nudge1", "nudge2", "summary",
+                                         "stale", "red"}
     assert all(r["state"] == "unchecked" for r in runs)
 
 

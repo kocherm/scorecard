@@ -47,18 +47,55 @@ migrate/seed_data.example.json for the shape.
 ## Staleness vs red
 
 Entries for last week are due Monday end of day (business timezone). If nothing
-is entered by Wednesday 08:00, the cell turns gray ("no data") and a Slack alert
-fires. Gray is deliberately distinct from red ("bad number"): different problem,
-different conversation.
+is entered by Wednesday 08:00, the cell turns gray ("no data") and the stale
+roll-up fires. Gray is deliberately distinct from red ("bad number"): different
+problem, different conversation.
 
 ## Red escalation ladder
 
 - Week 1 red: the DRI files a 1-3-1 (one problem, three options, one
-  recommendation) in-app before the weekly sync.
-- Week 2 red on the same metric: a 15-minute 1:1 outside the sync.
-- Week 3+: structural conversation.
+  recommendation) in-app before the weekly sync. **DM only.**
+- Week 2 red on the same metric: a 15-minute 1:1 outside the sync. Channel.
+- Week 3+: structural conversation. Channel.
 Streak counting skips stale weeks: you cannot dodge escalation by not entering
 a number. Each escalation level Slack-notifies exactly once (dedupe table).
+
+## The channel gets counts, the DM gets to-dos
+
+Attention is the scarce resource, so message volume is a product rule, not an
+implementation detail. Nothing one named person can fix alone reaches the
+channel until they have been asked privately first, and then only inside an
+aggregate.
+
+**#scorecard**, at most two top-level messages a week, each with its per-metric
+detail in a thread:
+
+- **Tuesday 08:00 - week closed.** Green / yellow / red / no-number counts for
+  the closed week plus a link to the board; the red list and the missing list
+  are thread replies. Tuesday rather than Monday because Monday's numbers are
+  not in yet, and a summary that is mostly "no number yet" teaches people not
+  to open it.
+- **Tuesday 08:05 - escalations**, threaded under that summary, in one reply:
+  week-2 and week-3 reds only.
+- **Wednesday 08:00 - the chase.** How many metrics are still blank, out of how
+  many, and who owes how many ("Dana 7, Sam 3, unassigned 1"). Metric names go
+  in the thread. This is the only public naming, and it happens on the third
+  ask, never the first.
+
+**The DM** carries everything addressed to one person, batched into one message
+each: their missing numbers with targets, a magic link and the typed-reply
+shortcut (Monday 16:00, Tuesday 09:00 and again with Wednesday's roll-up), and
+every red on a metric they own including week 1.
+
+Ordering is load-bearing: private, private, then public. Two quiet chances
+before a name appears in a channel is what makes the Wednesday post mean
+something instead of being the noise people learn to scroll past.
+
+One message per sweep holds whether or not the instance can thread. An incoming
+webhook returns no `ts` and cannot be replied to, so there the detail is folded
+into the same message; with a bot token plus channel ID it goes into a thread
+and the channel shows a single line. The volume fix never depends on
+reconfiguring Slack first.
 
 ## Surfaces
 

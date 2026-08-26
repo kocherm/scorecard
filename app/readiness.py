@@ -164,10 +164,11 @@ def _check_slack_credentials(con: sqlite3.Connection) -> Check:
 
 
 def _check_slack_channel(con: sqlite3.Connection) -> Check:
-    """Channel posts prefer the webhook whenever one is set (alerts.py's
-    _record_and_send), which makes that field quietly decisive - and unlike a
-    bot token there is no Slack API that will tell you where a webhook points,
-    so its shape is all we get to check."""
+    """Channel posts prefer the webhook whenever one is set (alerts.post_rollup),
+    which makes that field quietly decisive - and unlike a bot token there is no
+    Slack API that will tell you where a webhook points, so its shape is all we
+    get to check. A webhook also cannot thread: the roll-ups still post as one
+    message each, but their detail is folded in rather than tucked away."""
     bot = dbm.get_setting(con, "slack_bot_token") or ""
     hook = (dbm.get_setting(con, "slack_webhook_url") or "").strip()
     channel = dbm.get_setting(con, "slack_channel_id") or ""
@@ -193,8 +194,9 @@ def _check_slack_channel(con: sqlite3.Connection) -> Check:
                      "No credentials to post with.", *fix)
     if not channel:
         return Check("slack_channel", "Team alert channel", WARN,
-                     "No channel ID. Stale and red alerts still DM the DRI, but "
-                     "nothing is posted where the team sees it.", *fix)
+                     "No channel ID. The stale and red sweeps still DM each "
+                     "DRI, but no weekly summary or roll-up is posted where "
+                     "the team sees it.", *fix)
     return Check("slack_channel", "Team alert channel", OK,
                  f"Channel {channel}. Re-check below to confirm the bot is in it.",
                  *fix)
@@ -204,8 +206,9 @@ def _check_alerts_switch(con: sqlite3.Connection) -> Check:
     on = dbm.get_setting(con, "alerts_enabled", "0") == "1"
     return Check(
         "alerts_enabled", "Slack alerts (master switch)", OK if on else BLOCKED,
-        "On. Stale and red sweeps deliver." if on else
-        "Off. Every sweep returns before sending - stale, red and nudges alike.",
+        "On. The summary, red and stale sweeps deliver." if on else
+        "Off. Every sweep returns before sending - summary, red, stale and "
+        "nudges alike.",
         f"{SETTINGS_URL}#slack", "Slack settings")
 
 
@@ -639,11 +642,14 @@ def apply_member_ids(con: sqlite3.Connection, pairs: list[str]) -> int:
 
 
 # ----------------------------------------------------------------- sweep runs
+# Chronological, so the page reads as the week the team actually experiences:
+# two quiet asks, then the summary, then the escalations, then the public chase.
 SWEEP_LABELS = {
     "nudge1": "Check-in nudge - Monday 4:00 PM",
+    "summary": "Week-closed summary - Tuesday 8:00 AM",
+    "red": "Red escalation - Tuesday 8:05 AM",
     "nudge2": "Check-in nudge - Tuesday 9:00 AM",
-    "red": "Red escalation - Tuesday 8:00 AM",
-    "stale": "Stale sweep - Wednesday 8:00 AM",
+    "stale": "Stale roll-up - Wednesday 8:00 AM",
 }
 SWEEP_STATE = {"sent": OK, "nothing": OK, "skipped": WARN}
 

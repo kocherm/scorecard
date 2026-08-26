@@ -1196,3 +1196,118 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
   font-size: 12px; font-weight: 500; color: var(--silver); cursor: pointer;
 }
 .panel details.why summary:hover { color: var(--accent-hover); }
+
+/* ---------- users: information in the table, controls in the drawer ----------
+   It used to be five columns of controls and two of data, with a dropdown, a
+   text box and a Save button inside one table cell, repeated per row. */
+.usr-panel { max-width: 1020px; }
+.usr { width: 100%; border-collapse: collapse; }
+.usr th {
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; text-align: left;
+  padding: 8px 10px; border-bottom: 1px solid var(--cloud);
+}
+.usr th.r, .usr td.r { text-align: right; }
+.usr td { padding: 9px 10px; border-bottom: 1px solid var(--ivory); font-size: 13px; }
+.usr tr.is-off td { opacity: 0.55; }
+.usr-sort { color: inherit; text-decoration: none; }
+.usr-sort:hover { color: var(--accent); }
+.usr-sort.on { color: var(--accent); }
+.usr-name { display: block; font-weight: 500; color: var(--ink); font-size: 13.5px; }
+.usr-mail { display: block; font-size: 11.5px; color: var(--silver); }
+.usr-owned { font-weight: 600; color: var(--navy); font-variant-numeric: tabular-nums; }
+/* The share bar is the whole point of the column: a count of 11 next to a
+   count of 1 is a sentence about how the work is distributed. */
+.usr-share {
+  display: block; width: 92px; height: 4px; margin: 4px 0 0 auto;
+  background: var(--pearl); border-radius: 999px; overflow: hidden;
+}
+.usr-share i { display: block; height: 100%; background: var(--navy); border-radius: 999px; }
+.usr-none { color: var(--mist); }
+.chip.role-admin { background: var(--navy); color: #fff; }
+.chip.role-editor { background: var(--pearl); color: var(--ink-light); }
+.chip.role-viewer { background: var(--ivory); color: var(--silver); }
+
+.usr-drawer > td { background: var(--warm-white); padding: 0 10px 4px; }
+.usr-grid {
+  display: grid; gap: 20px; padding: 16px 8px 18px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+.usr-grid h3 {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; margin: 0 0 8px;
+}
+.usr-grid section > form { margin: 0; }
+.usr-grid select, .usr-grid input { margin: 0; }
+.usr-notify { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.usr-notify select { width: 118px; }
+.usr-notify input { width: 150px; }
+.usr-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.usr-actions form { margin: 0; }
+.usr-danger h3 { color: var(--red-deep); }
+.usr-grid .note { margin-top: 8px; }
+
+.usr-add { border-top: 1px solid var(--cloud); margin-top: 16px; padding-top: 12px; }
+.usr-add summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-light); }
+.usr-add summary:hover { color: var(--accent-hover); }
+.usr-addform {
+  display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 12px;
+}
+.usr-addform .note { flex-basis: 100%; margin: 0; }
+
+/* ---------- sections & metrics ---------- */
+.met-bar { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; }
+.met-new summary { list-style: none; display: inline-flex; cursor: pointer; }
+.met-new summary::-webkit-details-marker { display: none; }
+.met-new[open] { flex-basis: 100%; }
+.met-form {
+  display: flex; gap: 10px; align-items: end; flex-wrap: wrap;
+  margin-top: 12px; padding: 14px 16px;
+  background: #fff; border: 1px solid var(--cloud); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-subtle);
+}
+.met-form input, .met-form select { margin: 0; }
+.met-arch-link { margin-left: auto; font-size: 12px; color: var(--accent); text-decoration: none; }
+.met-arch-link:hover { text-decoration: underline; }
+
+.met-panel { max-width: 1080px; }
+.met-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.met-head h2 { margin: 0; }
+.met-head form { margin: 0 0 0 auto; }
+.met-wrap { overflow-x: auto; }
+.met { width: 100%; border-collapse: collapse; }
+.met th {
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--silver); font-weight: 500; text-align: left;
+  padding: 7px 8px; border-bottom: 1px solid var(--cloud);
+}
+.met td { padding: 7px 8px; border-bottom: 1px solid var(--ivory); font-size: 13px;
+          vertical-align: middle; }
+.met td.r, .met th.r { text-align: right; }
+.met .ord { width: 44px; white-space: nowrap; padding-left: 0; }
+.met-move { display: inline; margin: 0; }
+.met-arrow {
+  border: none; background: none; cursor: pointer; padding: 0 2px;
+  color: var(--mist); font-size: 10px; line-height: 1;
+}
+.met-arrow:hover:not(:disabled) { color: var(--navy); }
+.met-arrow:disabled { opacity: 0.3; cursor: default; }
+.met-arrow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.met-key { display: inline; margin: 0; }
+.met-star {
+  border: none; background: none; cursor: pointer; padding: 0 5px 0 0;
+  color: var(--cloud); font-size: 13px; line-height: 1;
+}
+.met-star:hover { color: var(--amber); }
+.met-star.on { color: var(--accent); }
+.met-star:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.met-name { color: var(--ink); font-weight: 500; text-decoration: none; }
+.met-name:hover { color: var(--accent); }
+.met-dri { color: var(--slate); }
+.met-noowner { color: var(--red-deep); font-weight: 500; }
+/* An automation owning a metric is a fact people used to discover by reading
+   the audit table after a number kept reverting. */
+.chip.api { background: var(--amber-subtle); color: var(--amber-deep); margin-left: 6px; }
+.met-actions { white-space: nowrap; }
+.met-actions form { display: inline; margin: 0; }
+.met-archived td { opacity: 0.5; border-top: 1px solid var(--cloud); }

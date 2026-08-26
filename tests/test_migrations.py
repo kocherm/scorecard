@@ -111,3 +111,69 @@ def test_fresh_schema_needs_no_migration(tmp_path, monkeypatch):
         assert con.execute("SELECT 1 FROM slack_prompts WHERE 0").fetchall() == []
         cols = [r["name"] for r in con.execute("PRAGMA table_info(sessions)")]
         assert "impersonate_user_id" in cols
+
+
+# ------------------------------------------------- channel roll-up migration
+OLD_SWEEP_RUNS = """
+CREATE TABLE sweep_runs (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT    NOT NULL CHECK (kind IN ('nudge1','nudge2','stale','red')),
+    ran_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    outcome    TEXT    NOT NULL CHECK (outcome IN ('sent','nothing','skipped')),
+    detail     TEXT    NOT NULL,
+    sent_count INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+
+@pytest.fixture
+def pre_rollup_db(tmp_path, monkeypatch):
+    """A DB from before the week-closed summary existed: sweep_runs still has
+    the four-kind CHECK, and slack_threads has never been created. Built and
+    committed here, like old_db, so no transaction is open when the rebuild
+    issues its own BEGIN."""
+    monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "t.db"))
+    with dbm.get_db() as con:
+        dbm.init_db(con)
+        con.execute("DROP TABLE sweep_runs")
+        con.execute(OLD_SWEEP_RUNS)
+        con.execute("CREATE INDEX idx_sweep_runs_kind ON sweep_runs(kind, id)")
+        con.execute("DROP TABLE slack_threads")
+        con.execute("""INSERT INTO sweep_runs (kind, outcome, detail, sent_count)
+                       VALUES ('stale','sent','Alerted 3 metrics.',3)""")
+    yield
+
+
+def test_the_summary_sweep_cannot_record_a_run_before_the_migration(pre_rollup_db):
+    with dbm.get_db() as con, pytest.raises(sqlite3.IntegrityError):
+        con.execute("INSERT INTO sweep_runs (kind, outcome, detail) "
+                    "VALUES ('summary','sent','x')")
+
+
+def test_migrating_keeps_the_history_and_accepts_the_new_kind(pre_rollup_db):
+    from migrate import channel_rollup
+
+    with dbm.get_db() as con:
+        assert channel_rollup.needs_migration(con)
+        channel_rollup.migrate(con)
+        assert not channel_rollup.needs_migration(con)
+
+        kept = con.execute("SELECT * FROM sweep_runs").fetchall()
+        assert [(r["kind"], r["sent_count"]) for r in kept] == [("stale", 3)]
+        con.execute("INSERT INTO sweep_runs (kind, outcome, detail) "
+                    "VALUES ('summary','sent','x')")
+        # The index rides on the dropped table and has to come back with it.
+        assert con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='idx_sweep_runs_kind'").fetchone()
+
+
+def test_slack_threads_arrives_with_init_db_not_a_migration(pre_rollup_db):
+    """New TABLES need no migration - init_db's CREATE TABLE IF NOT EXISTS makes
+    them on the next boot. Only the CHECK could not be altered in place."""
+    with dbm.get_db() as con:
+        assert not con.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='slack_threads'").fetchone()
+        dbm.init_db(con)
+        assert con.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='slack_threads'").fetchone()

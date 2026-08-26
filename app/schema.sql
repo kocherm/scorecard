@@ -206,6 +206,20 @@ CREATE TABLE IF NOT EXISTS slack_prompts (
     sent_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- The parent channel message each weekly roll-up hangs its detail off, so
+-- #scorecard gets ONE post per sweep instead of one per metric. Also the
+-- idempotency record for those posts: a row here means "this week was already
+-- announced", so a re-run appends to the thread rather than announcing twice.
+-- thread_ts is '' when the post went through an incoming webhook, which
+-- returns no ts and cannot be replied to - present, but not threadable.
+CREATE TABLE IF NOT EXISTS slack_threads (
+    week_start TEXT NOT NULL,
+    kind       TEXT NOT NULL,  -- 'summary' | 'stale'
+    thread_ts  TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (week_start, kind)
+);
+
 -- One row per sweep run, including the runs that send nothing. A sweep that
 -- stopped because a switch was off, or because the public base URL was empty,
 -- is indistinguishable from one that never fired unless it says so somewhere,
@@ -213,7 +227,8 @@ CREATE TABLE IF NOT EXISTS slack_prompts (
 -- latest row per kind.
 CREATE TABLE IF NOT EXISTS sweep_runs (
     id         INTEGER PRIMARY KEY,
-    kind       TEXT    NOT NULL CHECK (kind IN ('nudge1','nudge2','stale','red')),
+    kind       TEXT    NOT NULL CHECK (kind IN
+                 ('nudge1','nudge2','summary','stale','red')),
     ran_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     outcome    TEXT    NOT NULL CHECK (outcome IN ('sent','nothing','skipped')),
     detail     TEXT    NOT NULL,

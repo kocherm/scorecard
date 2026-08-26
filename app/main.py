@@ -22,7 +22,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from migrate import add_admin_scope, slack_two_way
+from migrate import add_admin_scope, channel_rollup, slack_two_way
 from migrate import passkeys as passkeys_migration
 
 from . import (alerts, channels, db as dbm, demo, entry_ops, grid as gridm,
@@ -91,6 +91,11 @@ async def lifespan(app: FastAPI):
         if slack_two_way.needs_alerts_migration(con):
             slack_two_way.migrate_alerts(con)
             log.info("Migrated alerts_sent.alert_type to allow nudges")
+        # slack_threads is a new table and arrives with init_db above; only
+        # sweep_runs' CHECK needs rebuilding for the summary sweep.
+        if channel_rollup.needs_migration(con):
+            channel_rollup.migrate(con)
+            log.info("Migrated sweep_runs.kind to allow the summary sweep")
         # magic_links.purpose + users.webauthn_handle for DBs that predate
         # password-reset links and passkeys. init_db above already made the two
         # new tables (they are IF NOT EXISTS); columns need this.
@@ -98,12 +103,21 @@ async def lifespan(app: FastAPI):
             log.info("Migration: %s", line)
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
+    # #scorecard's whole week: the Tuesday summary of the closed week, then the
+    # escalations that thread under it, then Wednesday's chase for what is
+    # still blank. Two top-level posts, everything else in their threads.
+    scheduler.add_job(alerts.summary_sweep, CronTrigger(
+        day_of_week="tue", hour=8, minute=0, timezone="America/Chicago"),
+        id="summary_sweep", replace_existing=True)
+    # Five minutes after the summary, not alongside it: red_sweep replies into
+    # that morning's thread, so the parent has to exist first. Concurrent cron
+    # jobs on the same minute would race for it and lose the thread.
+    scheduler.add_job(alerts.red_sweep, CronTrigger(
+        day_of_week="tue", hour=8, minute=5, timezone="America/Chicago"),
+        id="red_sweep", replace_existing=True)
     scheduler.add_job(alerts.stale_sweep, CronTrigger(
         day_of_week="wed", hour=8, minute=0, timezone="America/Chicago"),
         id="stale_sweep", replace_existing=True)
-    scheduler.add_job(alerts.red_sweep, CronTrigger(
-        day_of_week="tue", hour=8, minute=0, timezone="America/Chicago"),
-        id="red_sweep", replace_existing=True)
     # Check-in nudge DMs. Always registered; enable/preset are checked inside
     # the job (same pattern as alerts_enabled) so settings changes need no
     # rescheduling. Monday 16:00 = "due tonight"; Tuesday 09:00 = last call
@@ -1033,19 +1047,91 @@ def admin_root(user=Depends(require_admin)):
     return RedirectResponse("/admin/status", status_code=303)
 
 
+def _metric_writers(con: sqlite3.Connection) -> dict[int, dict]:
+    """Who or what last wrote each metric, and whether an automation is
+    involved at all.
+
+    This is the page where the app's sharpest trap should become visible: a
+    daily API writer upserts an ABSOLUTE value, so a number a person corrects
+    on Tuesday is silently gone by Wednesday with nothing in the UI saying why.
+    Finding that meant reading entry_audit for source='api'. Now the metric
+    says so."""
+    out: dict[int, dict] = {}
+    for r in con.execute(
+            """SELECT a.metric_id, a.source, a.changed_at,
+                      u.display_name AS person, t.name AS token
+               FROM entry_audit a
+               LEFT JOIN users u ON u.id = a.actor_user_id
+               LEFT JOIN api_tokens t ON t.id = a.actor_token_id
+               ORDER BY a.id DESC"""):
+        cur = out.setdefault(r["metric_id"], {"last": None, "by": None, "api": False})
+        if cur["last"] is None:
+            cur["last"] = r["changed_at"][:10]
+            cur["by"] = r["person"] or r["token"] or "-"
+            cur["source"] = r["source"]
+        if r["source"] == "api":
+            cur["api"] = True
+            cur["api_token"] = r["token"] or "an API token"
+    return out
+
+
 @app.get("/admin/metrics", response_class=HTMLResponse)
-def admin_metrics(request: Request, user=Depends(require_admin),
+def admin_metrics(request: Request, show_archived: int = 0,
+                  user=Depends(require_admin),
                   con: sqlite3.Connection = Depends(db_dep)):
-    sections = []
+    writers = _metric_writers(con)
+    sections, archived_total = [], 0
     for s in con.execute("SELECT * FROM sections ORDER BY sort_order, id"):
-        metrics = con.execute(
+        rows = con.execute(
             """SELECT m.*, u.display_name AS dri_name FROM metrics m
                LEFT JOIN users u ON u.id = m.dri_user_id
                WHERE m.section_id = ? ORDER BY m.sort_order, m.id""", (s["id"],)).fetchall()
-        sections.append({**dict(s), "metrics": metrics})
-    users = con.execute("SELECT * FROM users WHERE is_active = 1 ORDER BY display_name").fetchall()
+        live = [m for m in rows if not m["archived_at"]]
+        arch = [m for m in rows if m["archived_at"]]
+        archived_total += len(arch)
+        sections.append({**dict(s), "metrics": live, "archived": arch})
+    users = con.execute(
+        "SELECT * FROM users WHERE is_active = 1 ORDER BY display_name").fetchall()
     return render(request, "admin_metrics.html", user=user, active="metrics",
-                  sections=sections, users=users)
+                  sections=sections, users=users, writers=writers,
+                  archived_total=archived_total,
+                  show_archived=bool(show_archived))
+
+
+@app.post("/admin/metrics/{metric_id}/move")
+def move_metric(metric_id: int, dir: str = Form(...), user=Depends(require_admin),
+                con: sqlite3.Connection = Depends(db_dep)):
+    """Swap a metric with its neighbour inside its own section.
+
+    sort_order has been in the schema from the start with no way to change it
+    from the interface. Buttons rather than drag-and-drop: this is a rare,
+    precise action, it has to work from a keyboard, and a swap of two rows is
+    something a test can actually assert."""
+    m = _metric_or_404(con, metric_id)
+    rows = con.execute(
+        "SELECT id, sort_order FROM metrics WHERE section_id = ? AND archived_at IS NULL "
+        "ORDER BY sort_order, id", (m["section_id"],)).fetchall()
+    ids = [r["id"] for r in rows]
+    if metric_id not in ids:
+        raise HTTPException(404)
+    i = ids.index(metric_id)
+    j = i - 1 if dir == "up" else i + 1
+    if 0 <= j < len(ids):
+        # Rewrite the whole section's order rather than swapping two values:
+        # rows seeded with equal or NULL sort_order would otherwise swap into
+        # a tie and stop moving.
+        ids[i], ids[j] = ids[j], ids[i]
+        for pos, mid in enumerate(ids):
+            con.execute("UPDATE metrics SET sort_order = ? WHERE id = ?", (pos, mid))
+    return RedirectResponse("/admin/metrics", status_code=303)
+
+
+@app.post("/admin/metrics/{metric_id}/key")
+def toggle_key_metric(metric_id: int, user=Depends(require_admin),
+                      con: sqlite3.Connection = Depends(db_dep)):
+    _metric_or_404(con, metric_id)
+    con.execute("UPDATE metrics SET is_key = 1 - is_key WHERE id = ?", (metric_id,))
+    return RedirectResponse("/admin/metrics", status_code=303)
 
 
 @app.post("/admin/sections")
@@ -1194,24 +1280,50 @@ def save_targets(request: Request, year: int = Form(...), quarter: int = Form(..
         f"/admin/targets?year={year}&quarter={quarter}&saved={saved}", status_code=303)
 
 
+NOTIFY_CHANNELS = [("slack", "Slack"), ("telegram", "Telegram"), ("sms", "SMS"),
+                   ("whatsapp", "WhatsApp"), ("teams", "Teams"),
+                   ("gchat", "Google Chat")]
+
+
 # ---------------- users
-def _users_page(request: Request, con: sqlite3.Connection, user, **ctx):
-    users = con.execute("SELECT * FROM users ORDER BY display_name").fetchall()
+def _users_page(request: Request, con: sqlite3.Connection, user, sort: str = "",
+                **ctx):
+    # Metrics owned is the fact this page existed without: it is how you see
+    # that one person carries most of the board, which is a management problem
+    # the list of names alone will never show. Last entry answers the other
+    # question people bring here - is this account actually being used?
+    users = con.execute(
+        """SELECT u.*,
+                  (SELECT COUNT(*) FROM metrics m
+                    WHERE m.dri_user_id = u.id AND m.archived_at IS NULL) AS owned,
+                  (SELECT MAX(e.updated_at) FROM entries e
+                    WHERE e.entered_by_user_id = u.id) AS last_entry
+           FROM users u ORDER BY u.display_name""").fetchall()
+    if sort == "owned":
+        users = sorted(users, key=lambda u: (-u["owned"], u["display_name"]))
     # Which rows may be offered "Send reset link": a private channel, configured.
     # Computed here rather than in the template so the button cannot appear for
     # a Teams/Google Chat user, whose "DM" is the whole team's channel.
     for k in ("temp_password", "temp_user", "flash"):
         ctx.setdefault(k, None)
+    total_owned = sum(u["owned"] for u in users)
     return render(request, "admin_users.html", user=user, active="users",
-                  users=users, reachable={u["id"] for u in users
-                                          if channels.deliver_secret(con, u)},
+                  users=users, sort=sort,
+                  unowned=con.execute(
+                      "SELECT COUNT(*) c FROM metrics "
+                      "WHERE dri_user_id IS NULL AND archived_at IS NULL"
+                  ).fetchone()["c"],
+                  total_owned=total_owned,
+                  channel_labels=NOTIFY_CHANNELS,
+                  reachable={u["id"] for u in users
+                             if channels.deliver_secret(con, u)},
                   **ctx)
 
 
 @app.get("/admin/users", response_class=HTMLResponse)
-def admin_users(request: Request, user=Depends(require_admin),
+def admin_users(request: Request, sort: str = "", user=Depends(require_admin),
                 con: sqlite3.Connection = Depends(db_dep)):
-    return _users_page(request, con, user)
+    return _users_page(request, con, user, sort=sort)
 
 
 def _temp_password() -> str:

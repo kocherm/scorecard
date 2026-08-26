@@ -34,7 +34,19 @@ Slack app manifest). Check `git grep` before every commit.
   caller that omits it keeps the old unpaced behaviour rather than silently
   acquiring a new one.
 - Alert dedupe lives in alerts_sent; sweeps are idempotent, scheduled by APScheduler
-  (stale: Wed 08:00, red ladder: Tue 08:00, business timezone).
+  (week-closed summary: Tue 08:00, red ladder: Tue 08:05, stale roll-up: Wed 08:00,
+  business timezone). Message VOLUME is a rule, not a detail: the channel gets
+  counts and the DM gets to-dos, so every sweep posts at most ONE top-level
+  message (alerts.post_rollup) with its per-metric detail in a thread, and DMs
+  one message per PERSON, never per metric. Posting per metric is what this
+  replaced - fourteen posts one Wednesday morning, which is an alert nobody
+  reads. slack_threads holds the parent ts per week+kind and doubles as the
+  idempotency record, so a re-run appends instead of announcing twice; ''
+  means "posted through a webhook", which cannot thread. Red week 1 is DM-only
+  on purpose (SPEC.md) - spending the channel on the most common rung is how
+  it gets muted before week 3 arrives. red_sweep runs 5 minutes AFTER
+  summary_sweep because it replies into that thread; same-minute cron jobs
+  would race for the parent.
 - app/mcp.py is a remote MCP server (JSON-RPC over Streamable HTTP at /mcp) so
   Claude can READ the board conversationally. It is read-only on purpose: an
   API write is attributed to a token, and the connector authenticates as one

@@ -6,75 +6,178 @@
   <h1>Users</h1>
 </div>
 {% if temp_password %}
-<div class="flash ok">Temporary password for <strong>{{ temp_user }}</strong>: <span class="mono">{{ temp_password }}</span> - share it now; it is not shown again. They will be asked to change it on first sign-in.</div>
+<div class="flash ok">Temporary password for <strong>{{ temp_user }}</strong>:
+  <span class="mono">{{ temp_password }}</span> &mdash; share it now; it is not shown
+  again. They will be asked to change it on first sign-in.</div>
 {% endif %}
-{% if flash %}
-<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>
+{% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
+{% if unowned %}
+{% set one = unowned == 1 %}
+<div class="flash warn">{{ unowned }} live metric{{ '' if one else 's' }} {{ 'has' if one else 'have' }} no owner &mdash;
+  nobody is nudged for {{ 'it' if one else 'them' }}, and {{ 'it' if one else 'they' }} can never go
+  red at a person. <a href="/admin/metrics">Assign a DRI</a>.</div>
 {% endif %}
-<div class="panel">
-  <table class="list">
-    <tr><th>Name</th><th>Email</th><th>Role</th><th>Notifications</th><th>Status</th><th></th></tr>
-    {% for u in users %}
-    <tr>
-      <td>{{ u['display_name'] }}</td>
-      <td>{{ u['email'] }}</td>
-      <td>
-        <form method="post" action="/admin/users/{{ u['id'] }}/role" style="display:inline">
-          <select name="role" onchange="this.form.submit()" title="Admin: manages everything. Editor: updates metrics. Viewer: read-only." {% if u['id'] == user['id'] %}disabled{% endif %}>
-            <option value="admin" {% if u['role'] == 'admin' %}selected{% endif %}>admin</option>
-            <option value="editor" {% if u['role'] == 'editor' %}selected{% endif %}>editor</option>
-            <option value="viewer" {% if u['role'] == 'viewer' %}selected{% endif %}>viewer</option>
-          </select>
-        </form>
-      </td>
-      <td>
-        {% set ch = u['notify_channel'] or 'slack' %}
-        <form method="post" action="/admin/users/{{ u['id'] }}/notify" style="display:flex; gap:6px">
-          <select name="notify_channel" title="Where this user's check-in nudges go">
-            {% for key, label in [('slack','Slack'), ('telegram','Telegram'), ('sms','SMS'), ('whatsapp','WhatsApp'), ('teams','Teams'), ('gchat','Google Chat')] %}
-            <option value="{{ key }}" {% if ch == key %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-          </select>
-          <input type="text" name="address" value="{{ (u['slack_member_id'] if ch == 'slack' else u['notify_address']) or '' }}" placeholder="U0123ABC / +1555&hellip; / chat ID" style="width:130px" title="Slack member ID, phone number, or Telegram chat ID; not needed for Teams/Google Chat">
-          <button class="btn secondary sm">Save</button>
-        </form>
-      </td>
-      <td><span class="chip {{ 'on' if u['is_active'] else 'off' }}">{{ 'active' if u['is_active'] else 'deactivated' }}</span></td>
-      <td style="white-space:nowrap">
-        {% if u['is_active'] and u['id'] != user['id'] %}
-        <form method="post" action="/admin/users/{{ u['id'] }}/impersonate" style="display:inline">
-          <button class="btn secondary sm" title="See the app exactly as {{ u['display_name'] }} sees it">View as</button>
-        </form>
-        {% endif %}
-        {% if u['is_active'] and u['id'] in reachable %}
-        <form method="post" action="/admin/users/{{ u['id'] }}/reset-link" style="display:inline">
-          <button class="btn secondary sm" title="Message {{ u['display_name'] }} a link to set their own password. Their current password keeps working until they use it.">Send reset link</button>
-        </form>
-        {% endif %}
-        <form method="post" action="/admin/users/{{ u['id'] }}/reset" style="display:inline">
-          <button class="btn secondary sm" title="Set a temporary password to read out. Signs {{ u['display_name'] }} out everywhere immediately.">Reset password</button>
-        </form>
-        {% if u['id'] != user['id'] %}
-        <form method="post" action="/admin/users/{{ u['id'] }}/toggle" style="display:inline">
-          <button class="btn danger sm">{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
+
+<div class="panel usr-panel">
+  {# The table shows INFORMATION; every control lives in the row's drawer. It
+     used to be five columns of controls and two of data, with a dropdown, a
+     text box and a Save button inside a single table cell. #}
+  <table class="usr">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th class="r">
+          <a href="/admin/users?sort={{ '' if sort == 'owned' else 'owned' }}"
+             class="usr-sort {{ 'on' if sort == 'owned' }}"
+             title="Sort by how much of the board each person carries">Metrics owned</a>
+        </th>
+        <th>Last entry</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr class="{{ 'is-off' if not u['is_active'] }}">
+        <td>
+          <span class="usr-name">{{ u['display_name'] }}</span>
+          <span class="usr-mail">{{ u['email'] }}</span>
+        </td>
+        <td><span class="chip role-{{ u['role'] }}">{{ u['role'] }}</span></td>
+        <td class="r">
+          {%- if u['owned'] %}
+          {# A share of the board, not just a count: the imbalance is the point. #}
+          <span class="usr-owned">{{ u['owned'] }}</span>
+          <span class="usr-share" aria-hidden="true">
+            <i style="width:{{ (100 * u['owned'] / total_owned) | round | int if total_owned else 0 }}%"></i>
+          </span>
+          {%- else %}<span class="usr-none">&mdash;</span>{% endif %}
+        </td>
+        <td class="note">{{ u['last_entry'][:10] if u['last_entry'] else 'never' }}</td>
+        <td><span class="chip {{ 'on' if u['is_active'] else 'off' }}">{{ 'active' if u['is_active'] else 'deactivated' }}</span></td>
+        <td class="r">
+          <button type="button" class="btn secondary sm usr-toggle"
+                  aria-expanded="false" aria-controls="usr-{{ u['id'] }}">Manage</button>
+        </td>
+      </tr>
+      <tr class="usr-drawer" id="usr-{{ u['id'] }}" hidden>
+        <td colspan="6">
+          <div class="usr-grid">
+
+            <section>
+              <h3>Role</h3>
+              <form method="post" action="/admin/users/{{ u['id'] }}/role">
+                <select name="role" onchange="this.form.submit()"
+                        {% if u['id'] == user['id'] %}disabled{% endif %}
+                        title="Admin manages everything. Editor updates metrics. Viewer is read-only.">
+                  {% for r in ['admin', 'editor', 'viewer'] %}
+                  <option value="{{ r }}" {% if u['role'] == r %}selected{% endif %}>{{ r }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+              {% if u['id'] == user['id'] %}
+              <p class="note">You cannot change your own role.</p>
+              {% endif %}
+            </section>
+
+            <section>
+              <h3>Where nudges go</h3>
+              {% set ch = u['notify_channel'] or 'slack' %}
+              <form method="post" action="/admin/users/{{ u['id'] }}/notify" class="usr-notify">
+                <select name="notify_channel" aria-label="Notification channel">
+                  {% for key, label in channel_labels %}
+                  <option value="{{ key }}" {% if ch == key %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <input type="text" name="address"
+                       value="{{ (u['slack_member_id'] if ch == 'slack' else u['notify_address']) or '' }}"
+                       placeholder="U0123ABC / +1555&hellip; / chat ID"
+                       aria-label="Address on that channel">
+                <button class="btn secondary sm">Save</button>
+              </form>
+              <p class="note">Slack member ID, phone number, or Telegram chat ID.
+                Teams and Google Chat post to a shared channel and need no address.</p>
+            </section>
+
+            <section>
+              <h3>Access</h3>
+              <div class="usr-actions">
+                {% if u['is_active'] and u['id'] != user['id'] %}
+                <form method="post" action="/admin/users/{{ u['id'] }}/impersonate">
+                  <button class="btn secondary sm"
+                          title="See the app exactly as {{ u['display_name'] }} sees it">View as</button>
+                </form>
+                {% endif %}
+                {% if u['is_active'] and u['id'] in reachable %}
+                <form method="post" action="/admin/users/{{ u['id'] }}/reset-link">
+                  <button class="btn secondary sm"
+                          title="Message them a link to set their own password. Their current password keeps working until they use it.">Send reset link</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/admin/users/{{ u['id'] }}/reset">
+                  <button class="btn secondary sm"
+                          title="Set a temporary password to read out. Signs them out everywhere immediately.">Reset password</button>
+                </form>
+              </div>
+            </section>
+
+            {% if u['id'] != user['id'] %}
+            <section class="usr-danger">
+              <h3>{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</h3>
+              <p class="note">
+                {%- if u['is_active'] %}Signs them out and blocks sign-in. Their metrics keep
+                their history and stay assigned to them.
+                {%- else %}Lets them sign in again with their existing password.{% endif %}</p>
+              <form method="post" action="/admin/users/{{ u['id'] }}/toggle">
+                <button class="btn danger sm">{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</button>
+              </form>
+            </section>
+            {% endif %}
+
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
 
-  <h3>Add user</h3>
-  <form method="post" action="/admin/users" style="display:flex; gap:10px; align-items:end; flex-wrap:wrap">
-    <div><label>Name</label><input type="text" name="display_name" required></div>
-    <div><label>Email</label><input type="email" name="email" required></div>
-    <div><label>Role</label>
-      <select name="role">
-        <option value="editor">editor</option>
-        <option value="viewer">viewer</option>
-        <option value="admin">admin</option>
-      </select></div>
-    <button class="btn" type="submit">Create (temp password shown once)</button>
-  </form>
+  <details class="usr-add">
+    <summary>Add a user</summary>
+    <form method="post" action="/admin/users" class="usr-addform">
+      <div><label>Name</label><input type="text" name="display_name" required></div>
+      <div><label>Email</label><input type="email" name="email" required></div>
+      <div><label>Role</label>
+        <select name="role">
+          <option value="editor">editor</option>
+          <option value="viewer">viewer</option>
+          <option value="admin">admin</option>
+        </select></div>
+      <button class="btn" type="submit">Create</button>
+      <p class="note">A temporary password is shown once, here, on the next screen.</p>
+    </form>
+  </details>
 </div>
+
+<script>
+(function () {
+  /* One drawer at a time: two sets of identical controls open at once is how
+     you reset the wrong person's password. */
+  var rows = document.querySelectorAll(".usr-toggle");
+  rows.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var drawer = document.getElementById(btn.getAttribute("aria-controls"));
+      var open = drawer.hidden;
+      document.querySelectorAll(".usr-drawer").forEach(function (d) { d.hidden = true; });
+      document.querySelectorAll(".usr-toggle").forEach(function (b) {
+        b.setAttribute("aria-expanded", "false");
+        b.textContent = "Manage";
+      });
+      drawer.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.textContent = open ? "Close" : "Manage";
+    });
+  });
+})();
+</script>
 {% endblock %}

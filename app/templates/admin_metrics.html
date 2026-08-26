@@ -1,83 +1,172 @@
 {% extends "base.html" %}
-{% block title %}Metrics{% endblock %}
+{% block title %}Sections &amp; metrics{% endblock %}
 {% block content %}
 <div class="page-head">
   <div class="eyebrow">Admin</div>
-  <h1>Sections &amp; Metrics</h1>
-  <p class="page-sub">Structure of the scorecard. Archiving keeps history; nothing is ever deleted.</p>
+  <h1>Sections &amp; metrics</h1>
+  <p class="page-sub">The structure of the scorecard. Archiving keeps history; nothing is
+    ever deleted.</p>
+</div>
+
+<div class="met-bar">
+  <details class="met-new">
+    <summary class="btn sm">+ New metric</summary>
+    {# One form, not one per section. Five identical seven-field forms stacked
+       down the page was five times the chrome and none of the clarity. #}
+    <form method="post" action="/admin/metrics" class="met-form">
+      <div><label>Name</label><input type="text" name="name" required autofocus></div>
+      <div><label>Section</label>
+        <select name="section_id">
+          {% for s in sections %}<option value="{{ s['id'] }}">{{ s['name'] }}</option>{% endfor %}
+        </select></div>
+      <div><label>Type</label>
+        <select name="metric_type">
+          <option value="numeric">numeric</option>
+          <option value="binary">binary (yes/no)</option>
+          <option value="status">status (R/Y/G)</option>
+        </select></div>
+      <div><label>Rollup</label>
+        <select name="rollup">
+          <option value="sum">sum</option>
+          <option value="average">average</option>
+        </select></div>
+      <div><label>Unit</label><input type="text" name="unit" placeholder="$"></div>
+      <div><label>Direction</label>
+        <select name="direction">
+          <option value="up">higher is better</option>
+          <option value="down">lower is better</option>
+        </select></div>
+      <div><label>Owner (DRI)</label>
+        <select name="dri_user_id">
+          <option value="">&mdash;</option>
+          {% for u in users %}<option value="{{ u['id'] }}">{{ u['display_name'] }}</option>{% endfor %}
+        </select></div>
+      <button class="btn" type="submit">Add metric</button>
+    </form>
+  </details>
+
+  <details class="met-new">
+    <summary class="btn secondary sm">+ New section</summary>
+    <form method="post" action="/admin/sections" class="met-form">
+      <div><label>Name</label><input type="text" name="name" required></div>
+      <div><label>Icon</label>
+        <select name="icon">
+          {% for i in ['trend','dollar','heart','megaphone','wrench','users','chart'] %}
+          <option value="{{ i }}">{{ i }}</option>{% endfor %}
+        </select></div>
+      <button class="btn" type="submit">Add section</button>
+    </form>
+  </details>
+
+  {% if archived_total %}
+  <a class="met-arch-link" href="/admin/metrics{{ '' if show_archived else '?show_archived=1' }}">
+    {{ 'Hide' if show_archived else 'Show' }} {{ archived_total }} archived</a>
+  {% endif %}
 </div>
 
 {% for s in sections %}
-<div class="panel">
-  <div style="display:flex; align-items:center; gap:12px">
-    <h2 style="margin:0">{{ s['name'] }}</h2>
+<div class="panel met-panel">
+  <div class="met-head">
+    <h2>{{ s['name'] }}</h2>
     <span class="chip {{ 'on' if s['is_enabled'] else 'off' }}">{{ 'visible' if s['is_enabled'] else 'hidden' }}</span>
-    <form method="post" action="/admin/sections/{{ s['id'] }}/toggle" style="margin-left:auto">
+    <form method="post" action="/admin/sections/{{ s['id'] }}/toggle">
       <button class="btn secondary sm">{{ 'Hide section' if s['is_enabled'] else 'Show section' }}</button>
     </form>
   </div>
-  <table class="list">
-    <tr><th>Metric</th><th>Type</th><th>DRI</th><th>Unit</th><th>Direction</th><th>Start week</th><th></th></tr>
-    {% for m in s.metrics %}
-    <tr {% if m['archived_at'] %}style="opacity:.45"{% endif %}>
-      <td><a href="/m/{{ m['id'] }}">{{ m['name'] }}</a></td>
-      <td>{{ m['metric_type'] }}{% if m['rollup'] %} ({{ m['rollup'] }}){% endif %}</td>
-      <td>{{ m['dri_name'] or '-' }}</td>
-      <td>{{ m['unit'] or '-' }}</td>
-      <td>{{ 'higher is better' if m['direction'] == 'up' else 'lower is better' }}</td>
-      <td>{{ m['start_week'] }}</td>
-      <td style="white-space:nowrap">
-        <a class="btn secondary sm" href="/admin/metrics/{{ m['id'] }}">Edit</a>
-        {% if not m['archived_at'] %}
-        <form method="post" action="/admin/metrics/{{ m['id'] }}/archive" style="display:inline">
-          <button class="btn danger sm" onclick="return confirm('Archive {{ m['name'] }}? History is kept.')">Archive</button>
-        </form>
-        {% else %}
-        <form method="post" action="/admin/metrics/{{ m['id'] }}/unarchive" style="display:inline">
-          <button class="btn secondary sm">Restore</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
 
-  <h3>Add metric to {{ s['name'] }}</h3>
-  <form method="post" action="/admin/metrics" style="display:grid; grid-template-columns: repeat(6, minmax(120px, 1fr)) auto; gap:10px; align-items:end; max-width:1100px">
-    <input type="hidden" name="section_id" value="{{ s['id'] }}">
-    <div><label>Name</label><input type="text" name="name" required></div>
-    <div><label>Type</label>
-      <select name="metric_type">
-        <option value="numeric">numeric</option>
-        <option value="binary">binary (yes/no)</option>
-        <option value="status">status (R/Y/G)</option>
-      </select></div>
-    <div><label>Rollup</label>
-      <select name="rollup"><option value="sum">sum</option><option value="average">average</option></select></div>
-    <div><label>Unit</label><input type="text" name="unit" placeholder="$"></div>
-    <div><label>Direction</label>
-      <select name="direction"><option value="up">higher is better</option><option value="down">lower is better</option></select></div>
-    <div><label>DRI</label>
-      <select name="dri_user_id"><option value="">-</option>
-        {% for u in users %}<option value="{{ u['id'] }}">{{ u['display_name'] }}</option>{% endfor %}
-      </select></div>
-    <button class="btn sm" type="submit">Add</button>
-  </form>
+  {% if not s['metrics'] %}
+  <p class="note">No live metrics in this section.</p>
+  {% else %}
+  <div class="met-wrap">
+  <table class="met">
+    <thead>
+      <tr>
+        <th class="ord"></th>
+        <th>Metric</th>
+        <th>Owner</th>
+        <th>Type</th>
+        <th>Written by</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in s['metrics'] %}
+      {% set w = writers.get(m['id']) %}
+      <tr>
+        <td class="ord">
+          {# sort_order has been in the schema from the start with no way to
+             change it here. Buttons, not drag: keyboard-reachable and precise. #}
+          <form method="post" action="/admin/metrics/{{ m['id'] }}/move" class="met-move">
+            <input type="hidden" name="dir" value="up">
+            <button class="met-arrow" {% if loop.first %}disabled{% endif %}
+                    title="Move up" aria-label="Move {{ m['name'] }} up">&#9650;</button>
+          </form>
+          <form method="post" action="/admin/metrics/{{ m['id'] }}/move" class="met-move">
+            <input type="hidden" name="dir" value="down">
+            <button class="met-arrow" {% if loop.last %}disabled{% endif %}
+                    title="Move down" aria-label="Move {{ m['name'] }} down">&#9660;</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/admin/metrics/{{ m['id'] }}/key" class="met-key">
+            <button class="met-star {{ 'on' if m['is_key'] }}"
+                    title="{{ 'A key metric: starred on the board and shown on the TV Key view' if m['is_key'] else 'Mark as a key metric' }}"
+                    aria-pressed="{{ 'true' if m['is_key'] else 'false' }}">&#9733;</button>
+          </form>
+          <a class="met-name" href="/m/{{ m['id'] }}">{{ m['name'] }}</a>
+        </td>
+        <td>
+          {% if m['dri_name'] %}<span class="met-dri">{{ m['dri_name'] }}</span>
+          {% else %}<span class="met-noowner">no owner</span>{% endif %}
+        </td>
+        <td class="note">{{ m['metric_type'] }}{% if m['rollup'] %} &middot; {{ m['rollup'] }}{% endif %}
+          {%- if m['unit'] %} &middot; {{ m['unit'] }}{% endif %}
+          {%- if m['direction'] == 'down' %} &middot; lower is better{% endif %}</td>
+        <td>
+          {%- if not w %}<span class="note">never written</span>
+          {%- else %}
+          <span class="note">{{ w.by }} &middot; {{ w.last }}</span>
+          {%- if w.api %}
+          {# The trap, made visible: POST /entries upserts an absolute value, so
+             the automation quietly wins whatever a person typed that week. #}
+          <span class="chip api" title="{{ w.api_token }} writes this through the API. It upserts an absolute value, so anything entered by hand for the same week is replaced on the next run.">automated</span>
+          {%- endif %}{% endif %}
+        </td>
+        <td class="r met-actions">
+          <a class="btn secondary sm" href="/admin/metrics/{{ m['id'] }}">Edit</a>
+          <form method="post" action="/admin/metrics/{{ m['id'] }}/archive">
+            <button class="btn danger sm"
+                    onclick="return confirm('Archive {{ m['name'] }}? History is kept.')">Archive</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  {% if show_archived and s['archived'] %}
+  <table class="met met-archived">
+    <tbody>
+      {% for m in s['archived'] %}
+      <tr>
+        <td class="ord"></td>
+        <td><span class="met-name">{{ m['name'] }}</span>
+          <span class="note">archived {{ m['archived_at'][:10] }}</span></td>
+        <td class="note">{{ m['dri_name'] or '-' }}</td>
+        <td class="note">{{ m['metric_type'] }}</td>
+        <td></td>
+        <td class="r">
+          <form method="post" action="/admin/metrics/{{ m['id'] }}/unarchive">
+            <button class="btn secondary sm">Restore</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </div>
 {% endfor %}
-
-<div class="panel">
-  <h2>New section</h2>
-  <form method="post" action="/admin/sections" style="display:flex; gap:10px; align-items:end">
-    <div><label>Name</label><input type="text" name="name" required></div>
-    <div><label>Icon</label>
-      <select name="icon">
-        <option value="trend">trend</option><option value="dollar">dollar</option>
-        <option value="heart">heart</option><option value="megaphone">megaphone</option>
-        <option value="wrench">wrench</option><option value="users">users</option>
-        <option value="chart">chart</option>
-      </select></div>
-    <button class="btn" type="submit">Add section</button>
-  </form>
-</div>
 {% endblock %}
