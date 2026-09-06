@@ -25,8 +25,8 @@ from fastapi.templating import Jinja2Templates
 from migrate import add_admin_scope, channel_rollup, oto_revisions, slack_two_way
 from migrate import passkeys as passkeys_migration
 
-from . import (alerts, channels, db as dbm, demo, entry_ops, grid as gridm,
-               passkeys, readiness, weeks as wk)
+from . import (alerts, ceo as ceom, channels, db as dbm, demo, entry_ops,
+               grid as gridm, passkeys, readiness, weeks as wk)
 from .api import router as api_router
 from .mcp import router as mcp_router
 from .inbound import router as inbound_router
@@ -1068,10 +1068,11 @@ def _screensaver_active(con: sqlite3.Connection, now: datetime) -> bool:
 # 71944be. The board stays the default and the others are built from the SAME
 # TvVM that gridm.build_tv already returns - a view is a different arrangement
 # of the one board, never a second query path.
-TV_VIEWS = ("board", "act", "key")
+TV_VIEWS = ("board", "act", "key", "ceo")
 TV_VIEW_LABELS = {"board": "Full board",
                   "act": "Act on this",
-                  "key": "Key metrics"}
+                  "key": "Key metrics",
+                  "ceo": "CEO metrics"}
 TV_ROTATE_DEFAULT = 45
 # The poll is the only thing that advances a rotation, so a period shorter than
 # it would just be the poll interval with extra steps.
@@ -1095,6 +1096,9 @@ def _view_has_content(view: str, tv) -> bool:
         return bool(tv.actions)
     if view == "key":
         return any(r.is_key for col in tv.columns for sec in col for r in sec.rows)
+    if view == "ceo":
+        # Seven empty slots is a setup screen, not a board.
+        return bool(tv.ceo and tv.ceo.mapped)
     return True
 
 
@@ -1204,6 +1208,7 @@ def _metric_writers(con: sqlite3.Connection) -> dict[int, dict]:
 
 @app.get("/admin/metrics", response_class=HTMLResponse)
 def admin_metrics(request: Request, show_archived: int = 0,
+                  template: str = "", created: int = 0, skipped: int = 0,
                   user=Depends(require_admin),
                   con: sqlite3.Connection = Depends(db_dep)):
     writers = _metric_writers(con)
@@ -1222,7 +1227,27 @@ def admin_metrics(request: Request, show_archived: int = 0,
     return render(request, "admin_metrics.html", user=user, active="metrics",
                   sections=sections, users=users, writers=writers,
                   archived_total=archived_total,
-                  show_archived=bool(show_archived))
+                  show_archived=bool(show_archived),
+                  ceo_slots=ceom.SLOTS,
+                  ceo_installed=(template == "ceo"),
+                  ceo_created=created, ceo_skipped=skipped)
+
+
+@app.post("/admin/metrics/templates/ceo")
+def install_ceo_template(user=Depends(require_admin),
+                         con: sqlite3.Connection = Depends(db_dep)):
+    """One click: the seven CEO metrics as ordinary rows in their own section,
+    owned by whoever pressed the button (re-own them on Admin > Metrics).
+    Slots that already resolve to a live metric are mapped, not duplicated -
+    see ceo.install_template. The TV rotation is NOT touched: seven empty
+    rows are not yet a board worth showing, and what the TV cycles through
+    is a decision for Settings > TV views, never a side effect of adding
+    metrics."""
+    res = ceom.install_template(con, datetime.now(timezone.utc),
+                                dri_user_id=user["id"])
+    return RedirectResponse(
+        f"/admin/metrics?template=ceo&created={len(res.created)}"
+        f"&skipped={len(res.skipped)}", status_code=303)
 
 
 @app.post("/admin/metrics/{metric_id}/move")
@@ -1831,6 +1856,7 @@ def admin_settings(request: Request, saved: str = "", tab: str = "",
            JOIN sections s ON s.id = m.section_id
            WHERE m.archived_at IS NULL AND m.metric_type = 'numeric'
            ORDER BY s.sort_order, m.sort_order""").fetchall()
+    names = {gm["id"]: gm["name"] for gm in goal_metrics}
     # An unknown ?tab= falls back to the first group rather than rendering a
     # page with no panels on it at all.
     tab = tab if tab in ("display", "notify", "advanced") else "display"
@@ -1857,6 +1883,9 @@ def admin_settings(request: Request, saved: str = "", tab: str = "",
                   channel_settings={k: dbm.get_setting(con, k) or ""
                                     for k in _CHANNEL_SETTING_KEYS},
                   goal_metrics=goal_metrics,
+                  ceo_slot_defs=ceom.SLOTS,
+                  ceo_slots=ceom.explicit_slots(con),
+                  ceo_detected={k: names.get(v) for k, v in ceom.resolve_slots(con).items()},
                   hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
                   mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
                   mrr_milestones=dbm.get_setting(con, "mrr_milestones") or "",
@@ -1877,7 +1906,7 @@ def _slack_verify(con: sqlite3.Connection) -> readiness.Check:
 # never be rendered in one tab and redirected to another.
 SETTINGS_TABS = {
     "tv-display": "display", "tv-views": "display", "screensaver": "display",
-    "goal-band": "display", "display-window": "display",
+    "goal-band": "display", "ceo-view": "display", "display-window": "display",
     "slack": "notify", "nudges": "notify", "channels": "notify",
     "demo": "advanced",
 }
@@ -1904,6 +1933,23 @@ def save_goal_band(hud_mrr_metric_id: str = Form(""), mrr_goal: str = Form(""),
     dbm.set_setting(con, "mrr_goal", mrr_goal.strip())
     dbm.set_setting(con, "mrr_milestones", mrr_milestones.strip())
     return _settings_saved("goal-band")
+
+
+@app.post("/admin/settings/ceo-view")
+def save_ceo_view(slot_revenue: str = Form(""), slot_expenses: str = Form(""),
+                  slot_leads: str = Form(""), slot_conversions: str = Form(""),
+                  slot_cac: str = Form(""), slot_retention: str = Form(""),
+                  slot_profit: str = Form(""),
+                  user=Depends(require_admin),
+                  con: sqlite3.Connection = Depends(db_dep)):
+    """Which metric fills each of the seven CEO slots. Declared fields, not
+    `await request.form()`: routes stay sync (CLAUDE.md). ceo.save_slots
+    stores '' (auto-detect) for anything that is not a live numeric metric."""
+    ceom.save_slots(con, {
+        "revenue": slot_revenue, "expenses": slot_expenses, "leads": slot_leads,
+        "conversions": slot_conversions, "cac": slot_cac,
+        "retention": slot_retention, "profit": slot_profit})
+    return _settings_saved("ceo-view")
 
 
 @app.post("/admin/settings/display-months")

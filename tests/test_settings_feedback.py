@@ -59,6 +59,7 @@ def test_save_returns_to_the_panel_and_confirms(client):
     ("/admin/settings/alerts-toggle", {}, "slack"),
     ("/admin/settings/display-months", {"display_months": "3"}, "display-window"),
     ("/admin/settings/goal-band", {}, "goal-band"),
+    ("/admin/settings/ceo-view", {}, "ceo-view"),
     ("/admin/settings/channels", {"telegram_bot_token": "123:abc"}, "channels"),
     ("/admin/settings/screensaver-toggle", {}, "screensaver"),
     ("/admin/settings/rotate-display-token", {}, "tv-display"),

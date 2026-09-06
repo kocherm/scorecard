@@ -119,6 +119,21 @@ Slack app manifest). Check `git grep` before every commit.
   naming superseded_at fails against a not-yet-migrated table and takes the app
   down on boot instead of migrating it. Any future constraint that depends on a
   new column has the same trap.
+- TV views (main.TV_VIEWS) are arrangements of the ONE TvVM build_tv returns,
+  never a second query path. The "CEO metrics" view (app/ceo.py + grid.build_ceo
+  + _view_ceo.html) finds its seven rows through a slot mapping in settings
+  (ceo_slot_<slot> -> metric id) read from the DATA db through the same
+  connection build_tv uses, exactly like hud_mrr_metric_id: it is a map of
+  metric ids, which mean nothing across databases, so demo mode gets its own
+  (or the name fallback). The template installer creates ordinary metrics -
+  there is no second kind of row - and TvVM.rows carries every live row
+  unfolded because `columns` drops the goal metric and folded greens, which
+  is exactly what a by-id lookup would miss. Derived numbers (close rate,
+  margin) are computed in build_ceo from BoardRow.latest_raw and only when
+  both rows share week_note; a ratio across two weeks is a number nobody
+  asked for. On the TV the number's font is sized from its glyph count via
+  --len and container-query units (cqw): vh alone truncated every $ figure,
+  because a 16:9 panel runs out of width long before height.
 - Settings > Display embeds the real /display in an iframe, scaled. scale()
   takes a NUMBER, so the ratio is measured in JS and set as --tvprev-scale;
   calc(100cqw / 1920) is a length and silently does nothing. The frame is

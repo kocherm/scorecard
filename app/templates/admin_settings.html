@@ -147,6 +147,24 @@
     <button class="btn" type="submit" style="margin-top:12px">Save</button>
   </form>
 </div>
+<div class="panel" id="ceo-view" style="max-width:640px">
+  {% if saved == "ceo-view" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
+  <h2>CEO view</h2>
+  <details class="why"><summary>What the CEO view shows</summary>
+  <p class="note">The seven metrics every CEO should track &mdash; revenue, expenses, leads, conversions, CAC, retention, profit &mdash; on one TV screen: the growth funnel with its close rate, the cost to win and keep a customer, and revenue against expenses and profit as one picture. Each slot is filled by one of your metrics. Leave a slot on auto-detect and it takes the first live metric with a matching name; pick one to be explicit. Tick &ldquo;CEO metrics&rdquo; under TV views above to put it in the rotation, or add all seven at once from Admin &rsaquo; Metrics &rsaquo; Start from a template.</p></details>
+  <form method="post" action="/admin/settings/ceo-view" class="ceo-slots">
+    {% for s in ceo_slot_defs %}
+    <label for="slot_{{ s.key }}">{{ s.label }} <span class="note">{{ s.hint }}</span></label>
+    <select name="slot_{{ s.key }}" id="slot_{{ s.key }}">
+      <option value="">Auto-detect{% if ceo_detected[s.key] and not ceo_slots[s.key] %} &mdash; currently {{ ceo_detected[s.key] }}{% elif not ceo_slots[s.key] %} &mdash; no match yet{% endif %}</option>
+      {% for gm in goal_metrics %}
+      <option value="{{ gm.id }}" {% if ceo_slots[s.key] == gm.id|string %}selected{% endif %}>{{ gm.section }} &middot; {{ gm.name }}</option>
+      {% endfor %}
+    </select>
+    {% endfor %}
+    <button class="btn" type="submit" style="margin-top:12px">Save</button>
+  </form>
+</div>
 <div class="panel" id="display-window" style="max-width:640px">
   {% if saved == "display-window" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>Display window</h2>

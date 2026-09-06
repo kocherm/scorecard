@@ -113,6 +113,10 @@ reconfiguring Slack first.
   the 10s interval - it is counted in missed polls, not wall-clock, so it
   tracks the refresh rate automatically); hard-reloads every 6h to pick up
   deploys.
+  **TV views** (Admin > Settings > TV views): the full board, "Act on this"
+  (the footer's escalations at room-reading size), "Key metrics" (starred
+  rows) and "CEO metrics" (below). The TV rotates through the enabled set on
+  a server-side clock, skipping any view with nothing to show.
   Status sections (client health) sort worst-first: active red streaks,
   then yellow, no data, awaiting entry, green last. When a column would
   push rows below legibility, the greenest rows fold into a single "+N"
@@ -289,6 +293,39 @@ recordings, and product demos. Rules:
   and whenever the generator version changes.
 - Login, admin pages, Slack alerts, and the JSON API always use real data;
   the TV display URL (real token) keeps working and shows the demo while on.
+
+## The "7 metrics every CEO should track" template
+
+Revenue, Expenses, Leads, Conversions, CAC, Retention, Profit. Admin > Metrics
+> "Start from a template" creates the seven as ORDINARY metrics in a "CEO
+metrics" section (weekly numbers, entered, scored, paced, alerted and
+archived like any other row), owned by the admin who pressed the button. It
+does NOT touch the TV: the view is opt-in under Admin > Settings > TV views,
+so the wall keeps showing what it showed. Rules:
+
+- A slot you already track is mapped, never duplicated: a board with a
+  metric called "Revenue" gets the six it is missing. Running it twice adds
+  nothing.
+- The view finds its seven rows through a slot mapping (Admin > Settings >
+  CEO view), one metric per slot. An unset slot auto-detects by name (exact
+  label first, then keywords; "New MRR" never fills Revenue), the way the
+  goal band finds "MRR". So an existing board can be shown as a CEO view
+  without adding anything.
+- Rollups: the five flows are sums (and so pace during the week); CAC and
+  Retention are averages, because a ratio is already whole every day it is
+  read. Expenses and CAC score lower-is-better. Retention carries the %
+  unit.
+- The view arranges the seven as the story they tell: the growth engine
+  across the top (Leads, Conversions, Revenue, with the close rate and
+  revenue per new customer between them), unit economics (CAC, Retention)
+  and the bottom line (Expenses, Profit, and revenue/expenses/profit as bars
+  scaled to one another with the margin). Every tile shows the number in its
+  state colour, a ring for share of target ("on budget" for a
+  lower-is-better metric under its target), target, 4-week trend and owner.
+  The ratios are derived at render time, never stored, and only when both
+  inputs come from the same week. An unmapped slot shows as "Not tracked"
+  with a pointer to the setting; the view is skipped by the rotation while
+  no slot is mapped at all.
 
 ## Review cadence (methodology, enforced socially not in code)
 

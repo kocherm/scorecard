@@ -7,7 +7,7 @@
 <header class="b-head">
   <span class="seam"></span>
   <a class="wordmark" href="#" onclick="openAbout(event)" title="About Aprendio">APRENDIO</a>
-  <span class="b-title">{{ {'board': 'Company Scorecard', 'act': 'Act on this', 'key': 'Key metrics'}[view] }}</span>
+  <span class="b-title">{{ {'board': 'Company Scorecard', 'act': 'Act on this', 'key': 'Key metrics', 'ceo': 'CEO metrics'}[view] }}</span>
   <span class="b-spacer"></span>
   <span class="b-counts">
     <span class="c green">{{ s.green }}</span>
@@ -21,4 +21,5 @@
 
 {% if view == 'act' %}{% include "_view_act.html" %}
 {% elif view == 'key' %}{% include "_view_key.html" %}
+{% elif view == 'ceo' %}{% include "_view_ceo.html" %}
 {% else %}{% include "_view_board.html" %}{% endif %}

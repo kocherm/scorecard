@@ -1104,6 +1104,111 @@ body.tvboard .fab:hover, body.tvboard .fab:focus-visible { opacity: 1; }
 .vk-who { display: flex; align-items: center; gap: 0.6vw; font-size: 1.8vh;
   color: var(--mist); }
 
+/* CEO metrics view: the seven numbers as the story they tell. Three glass
+   bands - growth engine across the top, unit economics and bottom line below -
+   each tile a ring (share of target), the number, its target, trend and
+   owner. Rings and numbers take the cell's state colour; the ring glow is
+   currentColor, so no colour enters here that the board does not already
+   use. Sized in vh/vw like every other view: it fills the screen once and
+   never scrolls. */
+.v-ceo { flex: 1 1 auto; min-height: 0; display: grid; gap: 1.6vh 1.4vw;
+  grid-template-columns: 1fr 1fr; grid-template-rows: 0.85fr 1.15fr; padding: 0.4vh 0 0.6vh; }
+.vc-band { position: relative; min-width: 0; min-height: 0; display: grid; align-items: stretch;
+  gap: 0 1vw; padding: 4vh 1.6vw 1.6vh; border-radius: 1.6vh;
+  background: var(--tvb-panel); border: 1px solid var(--tvb-line); }
+.vc-band.growth { grid-column: 1 / -1; grid-template-columns: 1fr auto 1fr auto 1.25fr; }
+.vc-band.unit { grid-template-columns: 1fr 1fr; }
+/* Two tiles over the bars, not three columns: a third column left each
+   number ~120px of room on a 1080p panel. */
+.vc-band.bottom { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr auto; }
+.vc-bandlabel { position: absolute; top: 1.3vh; left: 1.6vw; right: 1.6vw;
+  display: flex; align-items: center; gap: 1vw; font-size: 1.7vh; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--accent); font-weight: 500; }
+.vc-bandlabel::after { content: ""; flex: 1; height: 1px; background: var(--tvb-line); }
+.vc-margin { order: 2; letter-spacing: 0; text-transform: none; font-size: 1.9vh; font-weight: 600;
+  padding: 0.25vh 1vw; border-radius: 999px; color: var(--navy-deep); background: var(--mist);
+  font-variant-numeric: tabular-nums; }
+.vc-margin.green { background: var(--tvb-green); }
+.vc-margin.yellow { background: var(--tvb-amber); }
+.vc-margin.red { background: var(--tvb-red); }
+
+.vc-tile { min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  justify-content: center; gap: 1.2vh; padding: 0 0.9vw; }
+.vc-tile + .vc-tile { border-left: 1px solid var(--tvb-line); }
+.vc-tile.untracked { opacity: 0.5; }
+.vc-eyebrow { display: flex; align-items: center; gap: 0.7vw; font-size: 2vh; font-weight: 600;
+  color: var(--mist); letter-spacing: 0.06em; text-transform: uppercase; }
+.vc-eyebrow b { font-size: 1.6vh; color: var(--accent); font-variant-numeric: tabular-nums; }
+.vc-main, .vc-empty { display: flex; align-items: center; gap: 1.3vw; min-width: 0; }
+.vc-ring { position: relative; flex: none; width: 12vh; height: 12vh; color: var(--stale); }
+.hero .vc-ring { width: 15vh; height: 15vh; }
+.vc-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+.vc-ring circle { fill: none; stroke-width: 9; }
+.vc-ring .track { stroke: rgba(255,255,255,0.10); }
+.vc-ring.none .track { stroke-dasharray: 3 5; }
+.vc-ring .fill { stroke: currentColor; stroke-linecap: round;
+  filter: drop-shadow(0 0 0.8vh currentColor); }
+.vc-ring.green { color: var(--tvb-green); }
+.vc-ring.yellow { color: var(--tvb-amber); }
+.vc-ring.red { color: var(--tvb-red); }
+.vc-pct { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; font-size: 2.7vh; font-weight: 600; color: #fff; line-height: 1;
+  font-variant-numeric: tabular-nums; }
+.hero .vc-pct { font-size: 3.4vh; }
+.vc-pct small { font-size: 1.3vh; font-weight: 500; color: var(--stale); margin-top: 0.5vh;
+  letter-spacing: 0.05em; text-transform: uppercase; }
+.vc-pct.dim { color: var(--stale); font-size: 3vh; }
+/* An inline-size container so the number can be sized from ITS width: the
+   template sets --len (glyph count) and the font shrinks only as far as a
+   seven-glyph dollar figure needs, never ellipsising on a 16:9 panel. */
+.vc-numwrap { flex: 1 1 auto; min-width: 0; container-type: inline-size; }
+.vc-num { --cap: 7.2vh; font-size: min(var(--cap), calc(100cqw / (var(--len, 4) * 0.58)));
+  font-weight: 700; line-height: 1; letter-spacing: -0.02em; color: #fff;
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.growth .vc-num { --cap: 8vh; }
+.hero .vc-num { --cap: 11vh; }
+.vc-num.green { color: var(--tvb-green); }
+.vc-num.yellow { color: var(--tvb-amber); }
+.vc-num.red { color: var(--tvb-red); }
+.vc-num.stale, .vc-num.pending { color: var(--stale); }
+.vc-sub { margin-top: 0.9vh; font-size: 2vh; color: var(--stale); }
+.vc-empty .vc-num { --cap: 4.2vh; font-weight: 600; }
+.vc-empty .vc-sub { font-size: 1.7vh; }
+.vc-foot { display: flex; align-items: center; justify-content: space-between; gap: 1vw; }
+.vc-who { display: flex; align-items: center; gap: 0.6vw; font-size: 1.8vh; color: var(--mist); }
+
+/* connectors between the funnel tiles: a rule with a chevron, the ratio on it */
+.vc-link { align-self: center; width: 7vw; display: flex; flex-direction: column;
+  align-items: center; gap: 0.7vh; text-align: center; }
+.vc-arrow { position: relative; width: 100%; height: 2px; background: var(--tvb-line); }
+.vc-arrow::after { content: ""; position: absolute; right: 0; top: 50%; width: 1.3vh; height: 1.3vh;
+  border-top: 2px solid var(--mist); border-right: 2px solid var(--mist);
+  transform: translate(-0.1vh, -50%) rotate(45deg); }
+.vc-link b { font-size: 3.2vh; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+.vc-link small { font-size: 1.45vh; color: var(--stale); letter-spacing: 0.06em; text-transform: uppercase; }
+.vc-link.empty .vc-arrow { opacity: 0.6; }
+
+/* bottom line: revenue, expenses, profit as bars scaled to the largest */
+.vc-pl { grid-column: 1 / -1; min-width: 0; display: flex; flex-direction: column;
+  justify-content: center; gap: 1vh; padding-top: 1.4vh; margin-top: 0.6vh;
+  border-top: 1px solid var(--tvb-line); }
+.vc-bar { display: grid; grid-template-columns: minmax(5vw, 7vw) 1fr auto; align-items: center;
+  gap: 0.8vw; font-size: 1.9vh; }
+.vc-barname { color: var(--mist); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-bartrack { height: 2.6vh; background: rgba(255,255,255,0.08); border-radius: 0.9vh; overflow: hidden; }
+.vc-bartrack i { display: block; height: 100%; border-radius: 0.9vh; background: var(--tvb-stale); }
+.vc-bartrack i.revenue { background: linear-gradient(90deg, var(--accent), #F7934C); }
+.vc-bartrack i.expenses { background: rgba(255,255,255,0.35); }
+.vc-bartrack i.green { background: var(--tvb-green); }
+.vc-bartrack i.yellow { background: var(--tvb-amber); }
+.vc-bartrack i.red, .vc-bartrack i.neg { background: var(--tvb-red); }
+.vc-barval { min-width: 5.5vw; text-align: right; font-weight: 600; color: #fff;
+  font-variant-numeric: tabular-nums; }
+.vc-barval.green { color: var(--tvb-green); }
+.vc-barval.yellow { color: var(--tvb-amber); }
+.vc-barval.red { color: var(--tvb-red); }
+.vc-plnote { font-size: 1.5vh; color: var(--stale); }
+
 .conn-lost { position: fixed; right: 2.2vw; bottom: 2vh; z-index: 60;
   background: var(--tvb-red); color: var(--navy-deep); font-size: 1.9vh;
   font-weight: 600; padding: 0.9vh 1.2vw; border-radius: 1vh; }
@@ -1554,6 +1659,18 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
   transform: scale(var(--tvprev-scale, 0.3));
   pointer-events: none;
 }
+
+/* Admin > Metrics: the template card. The list runs in two columns so the
+   seven fit beside the button without the card becoming a page. */
+.met-template { align-items: flex-start; }
+.met-template-copy { flex: 1 1 360px; max-width: 640px; }
+.met-template-copy h3 { margin: 0 0 4px; font-size: 15px; }
+.met-template-copy p { margin: 6px 0; }
+.met-template-list { margin: 8px 0; padding-left: 20px; columns: 2; column-gap: 24px; font-size: 13px; }
+.met-template-list li { margin: 2px 0; break-inside: avoid; }
+/* Admin > Settings > CEO view: seven label/select pairs */
+.ceo-slots label { display: block; margin-top: 12px; }
+.ceo-slots label .note { font-weight: normal; margin-left: 6px; }
 
 /* ---------- phone: the rail collapses to icons ----------
    Not cosmetic. The rail is 196px fixed and .page reserves 220px for it at

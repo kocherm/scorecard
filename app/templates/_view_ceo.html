@@ -1,0 +1,95 @@
+{# "CEO metrics": the seven numbers every CEO should track - Revenue,
+   Expenses, Leads, Conversions, CAC, Retention, Profit - arranged as the
+   story they tell rather than as a list. Growth engine across the top
+   (leads become customers become revenue, with the two ratios between them),
+   unit economics bottom-left, bottom line bottom-right with revenue,
+   expenses and profit as bars scaled to one another.
+
+   Every tile is a BoardRow from the same build_tv the board renders, found
+   through the slot mapping in app/ceo.py; the ratios (close rate, revenue per
+   customer, margin) are derived in grid.build_ceo at render time and only
+   when both inputs are from the same week. Rotation skips this view while no
+   slot is mapped (main._view_has_content), so an untracked tile is a hint on
+   a mostly-live board, never seven hints on an empty one. #}
+{% set c = tv.ceo %}
+
+{% macro tile(t, cls='') %}
+<article class="vc-tile {{ cls }}{% if not t.row %} untracked{% endif %}">
+  <div class="vc-eyebrow">{{ t.label }}</div>
+  {% if t.row %}
+  {% set r = t.row %}
+  <div class="vc-main">
+    <div class="vc-ring {{ r.latest_state }}{% if t.pct is none %} none{% endif %}">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="track" cx="50" cy="50" r="45"/>
+        {% if t.dash is not none %}<circle class="fill" cx="50" cy="50" r="45" style="stroke-dasharray:{{ t.dash }} 283"/>{% endif %}
+      </svg>
+      {% if t.pct is not none %}<span class="vc-pct">{{ t.pct_display }}<small>{{ t.pct_note }}</small></span>
+      {% else %}<span class="vc-pct dim"><small>no target</small></span>{% endif %}
+    </div>
+    <div class="vc-numwrap">
+      <div class="vc-num {{ r.latest_state }}" style="--len:{{ r.latest_display|length if r.latest_display != '-' else 1 }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
+      <div class="vc-sub">
+        {%- if r.target_display != '-' %}target {{ r.target_display }}{% endif %}
+        {%- if r.week_note %}{% if r.target_display != '-' %} &middot; {% endif %}{{ r.week_note }}{% endif %}
+        {%- if r.red_streak >= 1 %} <em class="b-flag red">red wk {{ r.red_streak }}</em>
+        {%- elif r.latest_state == 'stale' %} <em class="b-flag">no data</em>
+        {%- elif r.latest_state == 'pending' and not r.week_note %} <em class="b-flag">awaiting entry</em>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="vc-foot">
+    <span class="vk-trend">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></span>
+    <span class="vc-who">{% if r.initials %}<i class="b-av">{{ r.initials }}</i><b>{{ r.dri_first }}</b>{% endif %}</span>
+  </div>
+  {% else %}
+  <div class="vc-empty">
+    <div class="vc-ring none"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="45"/></svg><span class="vc-pct dim">&mdash;</span></div>
+    <div class="vc-numwrap"><div class="vc-num pending" style="--len:11">Not tracked</div>
+      <div class="vc-sub">Map a metric in Admin &rsaquo; Settings &rsaquo; CEO view</div></div>
+  </div>
+  {% endif %}
+</article>
+{% endmacro %}
+
+{% macro link(value, label) %}
+<div class="vc-link{% if not value %} empty{% endif %}">
+  <i class="vc-arrow"></i>
+  {% if value %}<b>{{ value }}</b><small>{{ label }}</small>{% endif %}
+</div>
+{% endmacro %}
+
+<section class="v-ceo">
+  <div class="vc-band growth">
+    <div class="vc-bandlabel">Growth engine</div>
+    {{ tile(c.tiles.leads) }}
+    {{ link(c.close_rate, 'close rate') }}
+    {{ tile(c.tiles.conversions) }}
+    {{ link(c.per_conversion, 'per new customer') }}
+    {{ tile(c.tiles.revenue, 'hero') }}
+  </div>
+
+  <div class="vc-band unit">
+    <div class="vc-bandlabel">Unit economics</div>
+    {{ tile(c.tiles.cac) }}
+    {{ tile(c.tiles.retention) }}
+  </div>
+
+  <div class="vc-band bottom">
+    <div class="vc-bandlabel">Bottom line{% if c.margin %} <b class="vc-margin {{ c.margin_state }}">{{ c.margin }} margin</b>{% endif %}</div>
+    {{ tile(c.tiles.expenses) }}
+    {{ tile(c.tiles.profit) }}
+    <div class="vc-pl">
+      {% for b in c.bars %}
+      <div class="vc-bar">
+        <span class="vc-barname">{{ b.label }}</span>
+        <span class="vc-bartrack"><i class="{{ b.cls }}{% if b.negative %} neg{% endif %}" style="width:{{ b.pct }}%"></i></span>
+        <span class="vc-barval {{ b.cls }}">{{ b.display }}</span>
+      </div>
+      {% else %}
+      <div class="vc-plnote">Revenue, expenses and profit for the same week draw here as one picture.</div>
+      {% endfor %}
+      {% if c.bars %}<div class="vc-plnote">{{ c.bars_note }}</div>{% endif %}
+    </div>
+  </div>
+</section>

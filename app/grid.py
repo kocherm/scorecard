@@ -86,6 +86,8 @@ def fmt_value(metric_type: str, unit: Optional[str], value) -> str:
     s = f"{v:,.0f}" if v == int(v) else f"{v:,.2f}"
     if unit == "$":
         return f"${s}"
+    if unit == "%":
+        return f"{s}%"
     return s
 
 
@@ -307,6 +309,13 @@ class BoardRow:
     spark: list           # last 4 closed weeks: {state, value, pct}
     red_streak: int
     section: str
+    # The number behind latest_display and the current-week target behind
+    # target_display, for views that derive (a ratio, a share of target).
+    # None when the metric is not numeric or nothing is entered.
+    latest_raw: Optional[float] = None
+    target_raw: Optional[float] = None
+    direction: str = "up"
+    unit: Optional[str] = None
 
 
 @dataclass
@@ -343,6 +352,11 @@ class TvVM:
     board_secs: int      # section labels in the fullest column
     actions: list        # top escalations for the footer line
     more_actions: int
+    # Every live row, unfolded and unfiltered - the goal metric and folded
+    # greens are removed from `columns`, but a view that looks rows up by id
+    # (the CEO view) needs the whole board.
+    rows: list = field(default_factory=list)
+    ceo: Optional["CeoVM"] = None
 
 
 def _initials(name: str) -> str:
@@ -535,7 +549,13 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 cur_state=(cur.state.value if cur else "pending"),
                 target_display=row.target_display,
                 spark=row.spark, red_streak=row.red_streak,
-                section=section.name))
+                section=section.name,
+                latest_raw=(float(latest_raw)
+                            if row.metric_type == "numeric"
+                            and isinstance(latest_raw, (int, float)) else None),
+                target_raw=(targets_by_metric.get(row.metric_id)
+                            if row.metric_type == "numeric" else None),
+                direction=row.direction, unit=row.unit))
 
 
     actions = build_actions(con, vm)
@@ -615,7 +635,116 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
 
     return TvVM(vm=vm, mrr=mrr, columns=columns,
                 board_rows=board_rows, board_secs=board_secs,
-                actions=actions[:3], more_actions=max(0, len(actions) - 3))
+                actions=actions[:3], more_actions=max(0, len(actions) - 3),
+                rows=rows, ceo=build_ceo(con, rows))
+
+
+# ---------------------------------------------------- the CEO view model
+@dataclass
+class CeoTile:
+    slot: str
+    number: str          # "01".."07", the order the template names them in
+    label: str
+    row: Optional[BoardRow]   # None = slot not mapped to any live metric
+    pct: Optional[float]      # share of target 0-100, drives the ring
+    pct_display: str          # "82%" / ""
+    dash: Optional[float]     # stroke-dasharray length for a r=45 ring
+    pct_note: str             # "of target" / "within budget" / ""
+
+
+@dataclass
+class CeoVM:
+    tiles: dict           # slot -> CeoTile, all seven always present
+    mapped: int           # how many slots found a live metric
+    close_rate: str       # conversions / leads, "" when either is missing
+    per_conversion: str   # revenue / conversions
+    margin: str           # profit / revenue
+    margin_state: str
+    bars: list            # bottom-line bars: {label, display, pct, cls}
+    bars_note: str        # which week the bars read from
+
+
+_RING = 2 * 3.14159265 * 45   # circumference of the r=45 ring in _view_ceo.html
+
+
+def _share_of_target(r: BoardRow) -> Optional[float]:
+    """0-100: how much of the week's target this number is. A lower-is-better
+    metric inverts, so 'under budget' reads as full, not as empty."""
+    if r.latest_raw is None or not r.target_raw or r.target_raw <= 0:
+        return None
+    if r.direction == "down":
+        ratio = 1.0 if r.latest_raw <= r.target_raw else r.target_raw / r.latest_raw
+    else:
+        ratio = r.latest_raw / r.target_raw
+    return max(0.0, min(100.0, ratio * 100))
+
+
+def build_ceo(con: sqlite3.Connection, rows: list[BoardRow]) -> CeoVM:
+    """Arrange the board's rows into the seven CEO slots (app/ceo.py owns the
+    slots and the mapping). Derived numbers - close rate, revenue per new
+    customer, margin - are computed here at render time and never stored, and
+    only when both inputs come from the SAME week: a close rate of this week's
+    leads over last week's conversions is a number nobody asked for."""
+    from . import ceo as ceom
+    by_id = {r.metric_id: r for r in rows}
+    mapping = ceom.resolve_slots(con)
+    tiles: dict[str, CeoTile] = {}
+    for i, slot in enumerate(ceom.SLOTS, start=1):
+        r = by_id.get(mapping.get(slot.key) or -1)
+        pct = _share_of_target(r) if r else None
+        note = ""
+        if pct is not None:
+            note = ("on budget" if r.direction == "down" and pct >= 100
+                    else "of budget" if r.direction == "down" else "of target")
+        tiles[slot.key] = CeoTile(
+            slot=slot.key, number=f"{i:02d}", label=slot.label, row=r, pct=pct,
+            pct_display=(f"{pct:.0f}%" if pct is not None else ""),
+            dash=(round(pct / 100 * _RING, 1) if pct is not None else None),
+            pct_note=note)
+
+    def same_week(*keys: str) -> Optional[list[BoardRow]]:
+        rs = [tiles[k].row for k in keys]
+        if any(r is None or r.latest_raw is None for r in rs):
+            return None
+        if len({r.week_note for r in rs}) != 1:
+            return None
+        return rs
+
+    close_rate = per_conversion = margin = ""
+    margin_state = ""
+    pair = same_week("leads", "conversions")
+    if pair and pair[0].latest_raw > 0:
+        close_rate = f"{pair[1].latest_raw / pair[0].latest_raw * 100:.1f}%"
+    pair = same_week("conversions", "revenue")
+    if pair and pair[0].latest_raw > 0:
+        per_conversion = fmt_value("numeric", pair[1].unit,
+                                   round(pair[1].latest_raw / pair[0].latest_raw))
+    pair = same_week("revenue", "profit")
+    if pair and pair[0].latest_raw > 0:
+        m = pair[1].latest_raw / pair[0].latest_raw * 100
+        margin = f"{m:.0f}%"
+        margin_state = pair[1].latest_state
+
+    # Bottom-line bars scale to the biggest of the three so revenue is the
+    # full width and expenses/profit read as shares of it.
+    bars, bars_note = [], ""
+    trio = [tiles[k].row for k in ("revenue", "expenses", "profit")]
+    live = [r for r in trio if r is not None and r.latest_raw is not None]
+    if len(live) >= 2 and len({r.week_note for r in live}) == 1:
+        top = max(abs(r.latest_raw) for r in live) or 1.0
+        for key, r in zip(("revenue", "expenses", "profit"), trio):
+            if r is None or r.latest_raw is None:
+                continue
+            cls = key if key != "profit" else (r.latest_state or "no-target")
+            bars.append({"label": r.name, "display": r.latest_display,
+                         "pct": round(max(1.5, abs(r.latest_raw) / top * 100), 1),
+                         "cls": cls, "negative": r.latest_raw < 0})
+        bars_note = live[0].week_note
+
+    return CeoVM(tiles=tiles, mapped=sum(1 for t in tiles.values() if t.row),
+                 close_rate=close_rate, per_conversion=per_conversion,
+                 margin=margin, margin_state=margin_state,
+                 bars=bars, bars_note=bars_note)
 
 
 # ---------------------------------------------------- one metric, in full

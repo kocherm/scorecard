@@ -40,6 +40,16 @@ both:
   single "+N all green" row so problems stay visible and the type stays big.
   Tokenized URL, no login on the TV, refreshes every 60s, survives token
   rotation, reloads itself daily.
+- **TV views**: the TV rotates on a server-side clock through the full board,
+  "Act on this" (escalations at room size), "Key metrics" (starred rows) and
+  "CEO metrics" - the seven numbers every CEO should track (revenue, expenses,
+  leads, conversions, CAC, retention, profit) arranged as the story they
+  tell: growth funnel with close rate, unit economics, and revenue against
+  expenses and profit as one picture. Views with nothing to show are skipped.
+- **Templates**: Admin > Metrics > "Start from a template" adds the 7 CEO
+  metrics as ordinary rows in one click, mapping any you already track by
+  name instead of duplicating them. The TV view stays opt-in (Settings > TV
+  views) until you turn it on.
 - **Tap-to-edit grid**: one number per metric per week; htmx inline editing.
 - **My Numbers check-in**: each owner gets a focused mobile-friendly page with
   just their metrics - missing numbers first, one-tap G/Y/R, big inputs, and
@@ -160,7 +170,9 @@ troubleshooting runbook.
   Review the board in one weekly meeting; discuss only yellows and reds.
 - **Admin > Metrics**: sections and metrics (numeric/binary/status, sum or
   average, higher- or lower-is-better, owner, "key metric" star for leading
-  indicators). Archive keeps history; nothing is ever deleted.
+  indicators). Archive keeps history; nothing is ever deleted. "Start from a
+  template" adds the 7 CEO metrics at once; which metric fills each slot of
+  the CEO TV view is set under Admin > Settings > CEO view.
 - **Admin > Targets**: baseline + stretch per metric per quarter. Editing a
   target rescores the whole quarter, deliberately: no renegotiating history.
 - **Admin > Users**: add people, change roles, deactivate, and two ways to deal

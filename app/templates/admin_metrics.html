@@ -8,6 +8,18 @@
     ever deleted.</p>
 </div>
 
+{% if ceo_installed %}
+<div class="flash ok">
+  {%- if ceo_created %}Added {{ ceo_created }} CEO metric{{ '' if ceo_created == 1 else 's' }} to the &ldquo;CEO metrics&rdquo; section
+  {%- else %}Every CEO slot already had a metric; nothing was added
+  {%- endif %}{% if ceo_skipped %} ({{ ceo_skipped }} slot{{ '' if ceo_skipped == 1 else 's' }} mapped to metrics you already had){% endif %}.
+  Set targets under <a href="/admin/targets">Targets</a>. When the numbers are in, tick
+  &ldquo;CEO metrics&rdquo; under <a href="/admin/settings?tab=display#tv-views">Settings &rsaquo; TV views</a>
+  to put the view in the rotation; which metric fills each slot is under
+  <a href="/admin/settings?tab=display#ceo-view">Settings &rsaquo; CEO view</a>.
+</div>
+{% endif %}
+
 <div class="met-bar">
   <details class="met-new">
     <summary class="btn sm">+ New metric</summary>
@@ -56,6 +68,28 @@
         </select></div>
       <button class="btn" type="submit">Add section</button>
     </form>
+  </details>
+
+  {# A template is seven ordinary metrics created at once, not a new kind of
+     row: everything about them - entry, scoring, alerts, archive - is the
+     same as a metric added by hand above. #}
+  <details class="met-new">
+    <summary class="btn secondary sm">Start from a template</summary>
+    <div class="met-form met-template">
+      <div class="met-template-copy">
+        <h3>The 7 metrics every CEO should track</h3>
+        <p class="note">One section, seven weekly numbers, and a TV view that reads them as a story:
+          leads become customers become revenue; what it costs to win and keep them; what is left.</p>
+        <ol class="met-template-list">
+          {% for s in ceo_slots %}<li><b>{{ s.label }}</b> <span class="note">{{ s.hint }}</span></li>{% endfor %}
+        </ol>
+        <p class="note">Slots you already track by name (a metric called &ldquo;Revenue&rdquo;, say) are mapped, not duplicated.
+          You own the new rows until you reassign them. Targets are set per quarter under Targets.</p>
+      </div>
+      <form method="post" action="/admin/metrics/templates/ceo">
+        <button class="btn" type="submit">Add the 7 CEO metrics</button>
+      </form>
+    </div>
   </details>
 
   {% if archived_total %}
