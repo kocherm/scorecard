@@ -20,6 +20,9 @@
 </div>
 {% endif %}
 
+{% if added %}<div class="flash ok">Added <strong>{{ added }}</strong>. It is on the board and the TV now; its first colour is due this week.</div>{% endif %}
+{% if dup %}<div class="flash err">There is already a live <strong>{{ dup }}</strong> in that section, so nothing was added.</div>{% endif %}
+
 <div class="met-bar">
   <details class="met-new">
     <summary class="btn sm">+ New metric</summary>
@@ -99,7 +102,7 @@
 </div>
 
 {% for s in sections %}
-<div class="panel met-panel">
+<div class="panel met-panel" id="sec-{{ s['id'] }}">
   <div class="met-head">
     <h2>{{ s['name'] }}</h2>
     <span class="chip {{ 'on' if s['is_enabled'] else 'off' }}">{{ 'visible' if s['is_enabled'] else 'hidden' }}</span>
@@ -107,6 +110,24 @@
       <button class="btn secondary sm">{{ 'Hide section' if s['is_enabled'] else 'Show section' }}</button>
     </form>
   </div>
+
+  {# Above the table, not under it: a roster is the list that gets long. #}
+  {% if s['is_roster'] %}
+  {% set noun = 'client' if 'client' in s['name']|lower else 'row' %}
+  <form method="post" action="/admin/metrics" class="met-quick">
+    <input type="hidden" name="section_id" value="{{ s['id'] }}">
+    <input type="hidden" name="metric_type" value="status">
+    <input type="hidden" name="again" value="1">
+    <label for="quick-{{ s['id'] }}">Add a {{ noun }}</label>
+    <input type="text" id="quick-{{ s['id'] }}" name="name" required
+           placeholder="{{ noun|capitalize }} name"{% if add_section == s['id'] %} autofocus{% endif %}>
+    <select name="dri_user_id" aria-label="Owner">
+      <option value="">no owner</option>
+      {% for u in users %}<option value="{{ u['id'] }}"{% if u['id'] == s['default_dri'] %} selected{% endif %}>{{ u['display_name'] }}</option>{% endfor %}
+    </select>
+    <button class="btn sm" type="submit">Add</button>
+  </form>
+  {% endif %}
 
   {% if not s['metrics'] %}
   <p class="note">No live metrics in this section.</p>
@@ -179,6 +200,7 @@
   </table>
   </div>
   {% endif %}
+
 
   {% if show_archived and s['archived'] %}
   <table class="met met-archived">

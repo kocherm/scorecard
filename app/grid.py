@@ -2,6 +2,7 @@
 the edit grid, and the JSON API."""
 from __future__ import annotations
 
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -325,6 +326,7 @@ class BoardSection:
     hidden: list = field(default_factory=list)  # folded rows behind the "+N" summary
     overflow_state: str = ""                    # worst hidden state, colors the +N chip
     overflow_label: str = ""                    # e.g. "all green" / "3 green · 1 no data"
+    subcols: int = 1                            # rows flow across this many sub-columns
 
 
 @dataclass
@@ -357,6 +359,12 @@ class TvVM:
     # (the CEO view) needs the whole board.
     rows: list = field(default_factory=list)
     ceo: Optional["CeoVM"] = None
+    # The "Clients" view: every row of every roster section (all R/Y/G),
+    # worst-first and never folded, with the tile-grid column count that
+    # fills a 16:9 panel for this many tiles.
+    roster: list = field(default_factory=list)
+    roster_cols: int = 1
+    roster_rotates: bool = False  # set by main._tv_view: Clients is in rotation
 
 
 def _initials(name: str) -> str:
@@ -372,12 +380,17 @@ NEXT_STEP = {
 
 
 # ---- board layout: the type scale never shrinks below legibility to absorb
-# an unbounded list. Status-only sections (client health) sort worst-first;
-# when a column would exceed COL_CAP_UNITS, their greenest tail rows fold
-# into one "+N" summary row. Curated numeric sections never fold, and the
-# edit grid always shows the complete list.
+# an unbounded list. Status-only sections (client health) sort worst-first.
+# When a column would exceed COL_CAP_UNITS, the largest status section in it
+# first WIDENS - its rows flow into up to MAX_SUBCOLS narrow sub-columns, which
+# is cheap for a status row (a colour, a name, a trend; no number or target) -
+# and only once that is exhausted do its greenest tail rows fold into one "+N"
+# summary cell. Widening comes first because a folded client is one nobody in
+# the room can see; a narrower name costs nothing. Curated numeric sections
+# never widen or fold, and the edit grid always shows the complete list.
 HDR_UNITS = 0.6       # a section label costs this fraction of a row's height
 COL_CAP_UNITS = 11.0  # ~10 rows + labels per column, keeps rows >= ~6.4vh
+MAX_SUBCOLS = 3       # a board column is ~46vw; a third of it still fits a name
 
 _SEVERITY = {"red": 0, "yellow": 1, "stale": 2, "pending": 3, "green": 5}
 
@@ -393,8 +406,15 @@ def _severity_key(r: BoardRow) -> tuple[int, int]:
     return (_SEVERITY.get(r.latest_state, 4), 0)
 
 
+def _lines(g: BoardSection) -> int:
+    """Row-heights the section's cells occupy: the "+N" summary is a cell
+    like any other, so it shares a line when there is room beside it."""
+    cells = len(g.rows) + (1 if g.hidden else 0)
+    return -(-cells // g.subcols)
+
+
 def _units(g: BoardSection) -> float:
-    return len(g.rows) + HDR_UNITS + (1 if g.hidden else 0)
+    return _lines(g) + HDR_UNITS
 
 
 def _overflow_label(hidden: list) -> str:
@@ -407,12 +427,28 @@ def _overflow_label(hidden: list) -> str:
     return " · ".join(f"{n} {w}" for w, n in counts.items())
 
 
+def _is_status(g: BoardSection) -> bool:
+    return bool(g.rows) and all(r.metric_type == "status" for r in g.rows)
+
+
+def _widen_one(groups: list[BoardSection]) -> bool:
+    """Give the tallest widenable status section one more sub-column."""
+    target = None
+    for g in groups:
+        if (_is_status(g) and g.subcols < MAX_SUBCOLS and _lines(g) > 1
+                and (target is None or _lines(g) > _lines(target))):
+            target = g
+    if target is None:
+        return False
+    target.subcols += 1
+    return True
+
+
 def _fold_one(groups: list[BoardSection]) -> bool:
     """Hide the greenest row of the largest foldable status section."""
     target = None
     for g in groups:
-        if (len(g.rows) > 1
-                and all(r.metric_type == "status" for r in g.rows)
+        if (len(g.rows) > 1 and _is_status(g)
                 and (target is None or len(g.rows) > len(target.rows))):
             target = g
     if target is None:
@@ -429,10 +465,11 @@ def _split_columns(groups: list[BoardSection]) -> list[list[BoardSection]]:
     if len(groups) == 1 and len(groups[0].rows) > 8:
         g = groups[0]
         half = (len(g.rows) + 1) // 2
-        return [[BoardSection(g.name, g.rows[:half])],
+        return [[BoardSection(g.name, g.rows[:half], subcols=g.subcols)],
                 [BoardSection("", g.rows[half:], hidden=g.hidden,
                               overflow_state=g.overflow_state,
-                              overflow_label=g.overflow_label)]]
+                              overflow_label=g.overflow_label,
+                              subcols=g.subcols)]]
     if len(groups) == 1:
         return [groups]
     best_k, best_gap = 1, None
@@ -443,17 +480,37 @@ def _split_columns(groups: list[BoardSection]) -> list[list[BoardSection]]:
     return [groups[:best_k], groups[best_k:]]
 
 
+ROSTER_TILE_RATIO = 3.0  # tile width : height that fits a name and a trend
+
+
+def _roster_cols(n: int) -> int:
+    """Columns for n tiles on the Clients view. The panel below the header is
+    about 1920x940, so tiles of ROSTER_TILE_RATIO come out when
+    rows / cols = ratio * 940 / 1920; solve for cols. 8 clients get 3
+    columns, 30 get 5, 60 get 7 - the grid grows with the list, never scrolls,
+    never folds."""
+    if n <= 1:
+        return 1
+    rows_per_col = ROSTER_TILE_RATIO * 940 / 1920
+    return max(2, math.ceil(math.sqrt(n / rows_per_col)))
+
+
 def _layout_board(groups: list[BoardSection]) -> tuple[list, int, int]:
     for g in groups:
-        if g.rows and all(r.metric_type == "status" for r in g.rows):
+        if _is_status(g):
             g.rows.sort(key=_severity_key)
     while True:
         columns = _split_columns(groups)
-        worst = max((sum(_units(g) for g in col) for col in columns), default=0.0)
-        if worst <= COL_CAP_UNITS or not _fold_one(groups):
+        worst = max(columns, key=lambda col: sum(map(_units, col)), default=[])
+        if sum(map(_units, worst)) <= COL_CAP_UNITS:
             break
-    board_rows = max((sum(len(g.rows) + (1 if g.hidden else 0) for g in col)
-                      for col in columns), default=1)
+        # Act on the overfull column first; its sections are the originals
+        # except in the one-section split, whose copies the fallback covers.
+        own = [g for g in groups if any(g is s for s in worst)]
+        if not (_widen_one(own) or _widen_one(groups)
+                or _fold_one(own) or _fold_one(groups)):
+            break
+    board_rows = max((sum(_lines(g) for g in col) for col in columns), default=1)
     board_secs = max((sum(1 for g in col if g.name) for col in columns), default=0)
     return columns, max(board_rows, 1), board_secs
 
@@ -631,12 +688,15 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
         if not groups or groups[-1].name != r.section:
             groups.append(BoardSection(name=r.section, rows=[]))
         groups[-1].rows.append(r)
+    roster = sorted((r for g in groups if _is_status(g) for r in g.rows),
+                    key=_severity_key)
     columns, board_rows, board_secs = _layout_board(groups)
 
     return TvVM(vm=vm, mrr=mrr, columns=columns,
                 board_rows=board_rows, board_secs=board_secs,
                 actions=actions[:3], more_actions=max(0, len(actions) - 3),
-                rows=rows, ceo=build_ceo(con, rows))
+                rows=rows, ceo=build_ceo(con, rows),
+                roster=roster, roster_cols=_roster_cols(len(roster)))
 
 
 # ---------------------------------------------------- the CEO view model

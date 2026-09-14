@@ -1022,6 +1022,45 @@ body.tvboard .fab:hover, body.tvboard .fab:focus-visible { opacity: 1; }
   color: var(--mist); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .b-row.b-more { border-bottom: none; }
 .b-row.b-more .b-name { color: var(--stale); font-weight: 400; }
+/* A roster widened into sub-columns (grid._layout_board): same row height as
+   the list, so --rows still counts lines; everything horizontal scales by --k
+   because each tile gets 1/k of the column. */
+.b-grid { display: grid; grid-template-columns: repeat(var(--k), minmax(0, 1fr)); column-gap: 1.6vw; }
+.b-row.mini { gap: 0.6vw; }
+.b-row.mini .b-chip { min-width: 2.6vw; padding: 0.5vh 0.5vw;
+  font-size: min(calc(var(--rowh) * 0.36), calc(4.4vw / var(--k))); }
+.b-row.mini .b-name { font-size: min(calc(var(--rowh) * 0.29), calc(3.9vw / var(--k))); }
+.b-row.mini .b-trend { gap: 0.2vw; }
+.b-row.mini .b-trend i { width: 1.2vh; height: 1.2vh; border-radius: 0.35vh; }
+.b-row.mini .b-trend i.now { border-width: 1.5px; }
+.b-sec-who { margin-left: 0.6em; text-transform: none; letter-spacing: 0.02em; color: var(--mist); }
+
+/* "Clients" view: a tile wall sized by grid._roster_cols. Tile height is the
+   panel split by --lines and everything inside scales from it, capped by the
+   tile's width (100vw / --cols) so a long name wraps instead of spilling. */
+.v-clients { flex: 1 1 auto; min-height: 0; display: grid; gap: 1.2vh 1vw;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--lines), minmax(0, 1fr));
+  --tileh: calc((88vh - (var(--lines) - 1) * 1.2vh) / var(--lines));
+  --tilew: calc((95.6vw - (var(--cols) - 1) * 1vw) / var(--cols)); }
+.vcl-tile { min-width: 0; min-height: 0; display: flex; align-items: center;
+  gap: min(calc(var(--tileh) * 0.12), 1.2vw); padding: 0 min(calc(var(--tileh) * 0.14), 1.2vw);
+  border-radius: 1.2vh; background: var(--tvb-panel); border: 1px solid var(--tvb-line); }
+.vcl-tile .b-chip { min-width: 0; padding: 0;
+  width: min(calc(var(--tileh) * 0.52), calc(var(--tilew) * 0.2));
+  height: min(calc(var(--tileh) * 0.52), calc(var(--tilew) * 0.2));
+  align-items: center; font-size: min(calc(var(--tileh) * 0.28), calc(var(--tilew) * 0.1)); }
+.vcl-body { flex: 1; min-width: 0; display: flex; flex-direction: column;
+  gap: min(calc(var(--tileh) * 0.06), 0.8vh); }
+.vcl-name { font-size: min(calc(var(--tileh) * 0.22), calc(var(--tilew) * 0.075));
+  font-weight: 600; color: var(--pearl); line-height: 1.12;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vcl-meta { display: flex; align-items: center; gap: 0.8vw; min-width: 0;
+  font-size: min(calc(var(--tileh) * 0.13), calc(var(--tilew) * 0.05)); color: var(--mist); }
+.vcl-meta b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vcl-meta .b-flag { margin-left: 0; font-size: 0.9em; }
+.vcl-meta .b-trend { gap: 0.25vw; }
+.vcl-meta .b-trend i { width: 0.9em; height: 0.9em; border-radius: 0.25em; }
 
 /* footer: escalation line + legend */
 .b-foot { flex: none; height: 3.6vh; display: flex; align-items: center; gap: 1.8vw;
@@ -1510,6 +1549,14 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
   box-shadow: var(--shadow-subtle);
 }
 .met-form input, .met-form select { margin: 0; }
+/* The one-field add form under a roster section (client health). */
+.met-quick { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 12px; background: var(--ivory); border-radius: var(--radius-md); }
+.met-quick label { margin: 0; font-size: 12px; font-weight: 600; color: var(--navy); }
+.met-quick input[type=text] { margin: 0; flex: 1 1 220px; max-width: 320px; }
+.met-quick select { margin: 0; width: auto; }
+.section-add { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--accent); text-decoration: none; }
+.section-add:hover { text-decoration: underline; }
 .met-arch-link { margin-left: auto; font-size: 12px; color: var(--accent); text-decoration: none; }
 .met-arch-link:hover { text-decoration: underline; }
 

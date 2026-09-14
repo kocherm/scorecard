@@ -85,12 +85,18 @@
 </tr>
 {% endmacro %}
 
-{% macro grid_tables(vm, editable=false, actor_id=none) %}
+{% macro grid_tables(vm, editable=false, actor_id=none, can_add=false) %}
 {% for section in vm.sections %}
 <div class="card" data-section>
   <div class="section-head">
     <span class="icon">{{ icon(section.icon) }}</span>
     <h2>{{ section.name }}</h2>
+    {# A roster (every row R/Y/G) grows a row at a time, and the board is where
+       people look for the place to do it. Admin-only, and never in demo mode:
+       the link carries a section id from the REAL db. #}
+    {% if can_add and section.rows and section.rows|rejectattr('metric_type', 'equalto', 'status')|list|length == 0 %}
+    <a class="section-add" href="/admin/metrics?add={{ section.id }}#sec-{{ section.id }}">+ Add {{ 'client' if 'client' in section.name|lower else 'row' }}</a>
+    {% endif %}
   </div>
   <div class="grid-wrap">
     <table class="grid">

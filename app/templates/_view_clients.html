@@ -1,0 +1,26 @@
+{# "Clients": every roster row (client health) as a tile wall that sizes itself
+   to the list - grid._roster_cols picks the columns, the rows share the
+   height - so the full client list is on screen however long it gets. The
+   board folds greens to make room for everything else; this view never
+   folds. Worst-first, from the same TvVM as every other view. #}
+{% set n = tv.roster|length %}
+{% set cols = tv.roster_cols %}
+{% set lines = ((n + cols - 1) // cols) if n else 1 %}
+<section class="v-clients" style="--cols:{{ cols }}; --lines:{{ lines }}">
+  {% for r in tv.roster %}
+  <article class="vcl-tile {{ r.latest_state }}">
+    <span class="b-chip {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</span>
+    <div class="vcl-body">
+      <div class="vcl-name">{{ r.name }}</div>
+      <div class="vcl-meta">
+        <span class="b-trend">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></span>
+        {%- if r.red_streak >= 1 %}<em class="b-flag red">red wk {{ r.red_streak }}</em>
+        {%- elif r.latest_state == 'stale' %}<em class="b-flag">no data</em>
+        {%- elif r.dri_first %}<b>{{ r.dri_first }}</b>{% endif %}
+      </div>
+    </div>
+  </article>
+  {% else %}
+  <article class="vcl-tile"><div class="vcl-body"><div class="vcl-name">No clients yet</div></div></article>
+  {% endfor %}
+</section>

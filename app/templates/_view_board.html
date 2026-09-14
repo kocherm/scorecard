@@ -28,7 +28,30 @@
   {% for col in tv.columns %}
   <div class="b-col">
     {% for sec in col %}
-    {% if sec.name %}<div class="b-sec">{{ sec.name }}</div>{% endif %}
+    {% set owners = sec.rows|map(attribute='dri_first')|unique|list %}
+    {% if sec.name %}<div class="b-sec">{{ sec.name }}{% if sec.subcols > 1 and owners|length == 1 and owners[0] %}<span class="b-sec-who">&middot; {{ owners[0] }}</span>{% endif %}</div>{% endif %}
+    {% if sec.subcols > 1 %}
+    {# A long roster flows into sub-columns (grid._layout_board) before any of
+       it folds. Its owner is said once in the label when everyone shares one,
+       instead of once per tile. #}
+    <div class="b-grid" style="--k:{{ sec.subcols }}">
+      {% for r in sec.rows %}
+      <div class="b-row mini">
+        <span class="b-chip {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</span>
+        <span class="b-name">{{ r.name }}{% if r.is_key %} <i class="star">&#9733;</i>{% endif %}
+          {%- if r.red_streak >= 1 %} <em class="b-flag red">wk {{ r.red_streak }}</em>
+          {%- elif r.latest_state == 'stale' %} <em class="b-flag">no data</em>{% endif %}</span>
+        <span class="b-trend">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></span>
+      </div>
+      {% endfor %}
+      {% if sec.hidden %}
+      <div class="b-row mini b-more">
+        <span class="b-chip {{ sec.overflow_state }}">+{{ sec.hidden|length }}</span>
+        <span class="b-name">{{ sec.overflow_label }}{% if tv.roster_rotates %} &middot; see Clients{% endif %}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
     {% for r in sec.rows %}
     <div class="b-row">
       <span class="b-chip {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}{% if r.metric_type == 'numeric' and r.target_display != '-' %}<small>/ {{ r.target_display }}</small>{% endif %}</span>
@@ -43,8 +66,9 @@
     {% if sec.hidden %}
     <div class="b-row b-more">
       <span class="b-chip {{ sec.overflow_state }}">+{{ sec.hidden|length }}</span>
-      <span class="b-name">{{ sec.overflow_label }}</span>
+      <span class="b-name">{{ sec.overflow_label }}{% if tv.roster_rotates %} &middot; see Clients{% endif %}</span>
     </div>
+    {% endif %}
     {% endif %}
     {% endfor %}
   </div>

@@ -134,6 +134,19 @@ Slack app manifest). Check `git grep` before every commit.
   asked for. On the TV the number's font is sized from its glyph count via
   --len and container-query units (cqw): vh alone truncated every $ figure,
   because a 16:9 panel runs out of width long before height.
+- A long client list is absorbed in three steps, in this order, and the order
+  is the design (grid._layout_board): a roster section (every row R/Y/G) first
+  WIDENS into up to MAX_SUBCOLS sub-columns, then folds its greenest rows into
+  a "+N" cell, and once anything folds the "Clients" view (_view_clients.html,
+  a tile wall sized by grid._roster_cols) enrols ITSELF in a rotating TV via
+  main._tv_view - the one view that does, because "a client nobody can see"
+  is not a state an admin should have to notice and fix in Settings. It
+  leaves again when everyone fits, and never joins when rotation is off
+  (there the "+N" cell would promise a view that never comes). Adding a
+  client is a one-field form at the TOP of the roster panel on Admin >
+  Sections & metrics (the board's section head links to it for admins, not
+  in demo mode - the link carries a real-db section id); POST /admin/metrics
+  refuses a second live row with the same name in a section.
 - Settings > Display embeds the real /display in an iframe, scaled. scale()
   takes a NUMBER, so the ratio is measured in JS and set as --tvprev-scale;
   calc(100cqw / 1920) is a length and silently does nothing. The frame is

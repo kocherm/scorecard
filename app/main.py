@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import secrets
 import sqlite3
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from urllib.parse import quote_plus
@@ -1068,11 +1069,12 @@ def _screensaver_active(con: sqlite3.Connection, now: datetime) -> bool:
 # 71944be. The board stays the default and the others are built from the SAME
 # TvVM that gridm.build_tv already returns - a view is a different arrangement
 # of the one board, never a second query path.
-TV_VIEWS = ("board", "act", "key", "ceo")
+TV_VIEWS = ("board", "act", "key", "ceo", "clients")
 TV_VIEW_LABELS = {"board": "Full board",
                   "act": "Act on this",
                   "key": "Key metrics",
-                  "ceo": "CEO metrics"}
+                  "ceo": "CEO metrics",
+                  "clients": "Clients"}
 TV_ROTATE_DEFAULT = 45
 # The poll is the only thing that advances a rotation, so a period shorter than
 # it would just be the poll interval with extra steps.
@@ -1099,6 +1101,8 @@ def _view_has_content(view: str, tv) -> bool:
     if view == "ceo":
         # Seven empty slots is a setup screen, not a board.
         return bool(tv.ceo and tv.ceo.mapped)
+    if view == "clients":
+        return bool(tv.roster)
     return True
 
 
@@ -1106,10 +1110,19 @@ def _tv_view(con: sqlite3.Connection, tv, now: datetime, override: str = "") -> 
     """The view this render shows: an explicit ?view= if it is enabled and has
     content, otherwise the clock-driven rotation over the enabled views."""
     enabled = _enabled_views(con)
+    seconds = _rotate_seconds(con)
+    # The one view that enrols itself: once the board has had to fold clients
+    # away, the Clients wall joins a rotating TV, so the list can outgrow the
+    # board without anyone revisiting Settings or anyone being off screen for
+    # good. Unticked, it leaves again as soon as everyone fits.
+    if (seconds > 0 and "board" in enabled and "clients" not in enabled
+            and any(sec.hidden for col in tv.columns for sec in col)):
+        enabled = enabled + ["clients"]
+    live = [v for v in enabled if _view_has_content(v, tv)]
+    # The board's "+N" cell says where the rest went - only when true.
+    tv.roster_rotates = seconds > 0 and "clients" in live and len(live) > 1
     if override in enabled and _view_has_content(override, tv):
         return override
-    live = [v for v in enabled if _view_has_content(v, tv)]
-    seconds = _rotate_seconds(con)
     return wk.rotation_pick(now, live or ["board"], seconds) or "board"
 
 
@@ -1209,6 +1222,7 @@ def _metric_writers(con: sqlite3.Connection) -> dict[int, dict]:
 @app.get("/admin/metrics", response_class=HTMLResponse)
 def admin_metrics(request: Request, show_archived: int = 0,
                   template: str = "", created: int = 0, skipped: int = 0,
+                  added: str = "", dup: str = "", add: int = 0,
                   user=Depends(require_admin),
                   con: sqlite3.Connection = Depends(db_dep)):
     writers = _metric_writers(con)
@@ -1221,7 +1235,14 @@ def admin_metrics(request: Request, show_archived: int = 0,
         live = [m for m in rows if not m["archived_at"]]
         arch = [m for m in rows if m["archived_at"]]
         archived_total += len(arch)
-        sections.append({**dict(s), "metrics": live, "archived": arch})
+        # A section of R/Y/G rows is a roster (client health): adding to it is
+        # a name and nothing else, so it gets its own one-field form with the
+        # type fixed and the owner defaulted to whoever owns most of it.
+        owners = Counter(m["dri_user_id"] for m in live if m["dri_user_id"])
+        sections.append({**dict(s), "metrics": live, "archived": arch,
+                         "is_roster": bool(live) and all(
+                             m["metric_type"] == "status" for m in live),
+                         "default_dri": owners.most_common(1)[0][0] if owners else None})
     users = con.execute(
         "SELECT * FROM users WHERE is_active = 1 ORDER BY display_name").fetchall()
     return render(request, "admin_metrics.html", user=user, active="metrics",
@@ -1230,7 +1251,8 @@ def admin_metrics(request: Request, show_archived: int = 0,
                   show_archived=bool(show_archived),
                   ceo_slots=ceom.SLOTS,
                   ceo_installed=(template == "ceo"),
-                  ceo_created=created, ceo_skipped=skipped)
+                  ceo_created=created, ceo_skipped=skipped,
+                  added=added, dup=dup, add_section=add)
 
 
 @app.post("/admin/metrics/templates/ceo")
@@ -1305,8 +1327,21 @@ def toggle_section(section_id: int, user=Depends(require_admin),
 def add_metric(section_id: int = Form(...), name: str = Form(...),
                metric_type: str = Form(...), rollup: str = Form("sum"),
                unit: str = Form(""), direction: str = Form("up"),
-               dri_user_id: str = Form(""),
+               dri_user_id: str = Form(""), again: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
+    name = " ".join(name.split())
+    # The roster form keeps its focus so a batch of clients is name, Enter,
+    # name, Enter - and lands back on the section it came from either way.
+    def back(flash: str = "") -> RedirectResponse:
+        q = "&".join(p for p in (flash, f"add={section_id}" if again else "") if p)
+        return RedirectResponse(f"/admin/metrics{'?' + q if q else ''}#sec-{section_id}",
+                                status_code=303)
+    if not name:
+        return back()
+    if con.execute("SELECT 1 FROM metrics WHERE section_id = ? AND archived_at IS NULL "
+                   "AND lower(name) = lower(?)", (section_id, name)).fetchone():
+        # Two live rows with one name are two tiles on the TV for one client.
+        return back(f"dup={quote_plus(name)}")
     start = wk.current_week(datetime.now(timezone.utc))
     mx = con.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM metrics WHERE section_id = ?",
                      (section_id,)).fetchone()["n"]
@@ -1318,7 +1353,7 @@ def add_metric(section_id: int = Form(...), name: str = Form(...),
          rollup if metric_type == "numeric" else None,
          direction, unit or None,
          int(dri_user_id) if dri_user_id else None, start.isoformat(), mx))
-    return RedirectResponse("/admin/metrics", status_code=303)
+    return back(f"added={quote_plus(name)}")
 
 
 @app.get("/admin/metrics/{metric_id}", response_class=HTMLResponse)
