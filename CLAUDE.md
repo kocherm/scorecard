@@ -134,6 +134,16 @@ Slack app manifest). Check `git grep` before every commit.
   asked for. On the TV the number's font is sized from its glyph count via
   --len and container-query units (cqw): vh alone truncated every $ figure,
   because a 16:9 panel runs out of width long before height.
+- /ceo is the CEO view as a PAGE (sidebar, everyone who can see the board),
+  drawn from the same build_ceo as the TV view. Two rules: slots may point into
+  a HIDDEN section - hidden means off the board, check-in and nudges, not
+  off the CEO's desk - so grid.ceo_rows adds those rows (building the hidden
+  grid only when a slot needs it) for both the page and the TV; and because
+  such a metric has no board row, the page reuses the board's quick editor
+  with origin=ceo (main.QUICK_ORIGINS), which answers a save with HX-Refresh
+  instead of _render_row. A TV pin (?view=, /tv?view=ceo) only has to name a
+  real view with content - Settings > TV views decides what an UNATTENDED
+  screen rotates through, not what a person pointed one at.
 - A long client list is absorbed in three steps, in this order, and the order
   is the design (grid._layout_board): a roster section (every row R/Y/G) first
   WIDENS into up to MAX_SUBCOLS sub-columns, then folds its greenest rows into

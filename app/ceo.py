@@ -45,6 +45,10 @@ class Slot:
     direction: str
     keywords: tuple      # lower-case fragments a metric name can match on
     hint: str            # one line for the settings page
+    # "New MRR" is a flow INTO revenue, never revenue itself - but "New leads"
+    # and "New customers" are exactly what those slots count, so the "new"
+    # exclusion belongs to the stock-like slots only.
+    new_is_a_flow: bool = True
 
 
 SLOTS: tuple[Slot, ...] = (
@@ -53,10 +57,10 @@ SLOTS: tuple[Slot, ...] = (
     Slot("expenses", "Expenses", "$", "sum", "down",
          ("expense", "cost", "spend", "burn"), "Money out. Lower is better."),
     Slot("leads", "Leads", None, "sum", "up",
-         ("lead",), "New people who raised a hand."),
+         ("lead",), "New people who raised a hand.", new_is_a_flow=False),
     Slot("conversions", "Conversions", None, "sum", "up",
          ("conversion", "new client", "new customer", "closed", "signup"),
-         "Leads that became customers."),
+         "Leads that became customers.", new_is_a_flow=False),
     Slot("cac", "CAC", "$", "average", "down",
          ("cac", "acquisition cost"), "Cost to acquire one customer. Lower is better."),
     Slot("retention", "Retention", "%", "average", "up",
@@ -89,7 +93,8 @@ def resolve_slots(con: sqlite3.Connection) -> dict[str, Optional[int]]:
     points at a live numeric metric; otherwise the first live metric whose
     name matches the slot - exact label first, then keyword - that no other
     slot has already claimed. "New MRR" never fills Revenue: a metric named
-    with 'new' is a flow into the thing, not the thing."""
+    with 'new' is a flow into the thing, not the thing - except for Leads and
+    Conversions, which are counts of new things (Slot.new_is_a_flow)."""
     live = _live_numeric(con)
     by_id = {m["id"]: m for m in live}
     out: dict[str, Optional[int]] = {}
@@ -111,7 +116,7 @@ def resolve_slots(con: sqlite3.Connection) -> dict[str, Optional[int]]:
         found = None
         for m in live:
             name = m["name"].lower()
-            if m["id"] in taken or "new" in name.split():
+            if m["id"] in taken or (s.new_is_a_flow and "new" in name.split()):
                 continue
             if name == s.label.lower():
                 found = m["id"]
@@ -119,7 +124,7 @@ def resolve_slots(con: sqlite3.Connection) -> dict[str, Optional[int]]:
         if found is None:
             for m in live:
                 name = m["name"].lower()
-                if m["id"] in taken or "new" in name.split():
+                if m["id"] in taken or (s.new_is_a_flow and "new" in name.split()):
                     continue
                 if any(k in name for k in s.keywords):
                     found = m["id"]

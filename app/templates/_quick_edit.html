@@ -23,7 +23,7 @@
   <div class="qe-week">
     <label for="qe-week-sel">Week</label>
     <select id="qe-week-sel" name="week"
-            hx-get="/quick/{{ m.metric_id }}"
+            hx-get="/quick/{{ m.metric_id }}{% if origin %}?origin={{ origin }}{% endif %}"
             hx-target="#quickedit" hx-swap="innerHTML" hx-trigger="change">
       {% for p in points %}
       <option value="{{ p.week.isoformat() }}" {% if p.week == sel.week %}selected{% endif %}>
@@ -45,6 +45,7 @@
      case. #}
   <form class="qe-body" hx-post="/quick/{{ m.metric_id }}/{{ sel.week.isoformat() }}"
         hx-target="#quickedit" hx-swap="innerHTML">
+    {% if origin %}<input type="hidden" name="origin" value="{{ origin }}">{% endif %}
     {% if m.metric_type == 'status' %}
     {# One tap, one write: three submit buttons rather than a select plus Save.
        A status has three possible values, so the fastest correct thing is to

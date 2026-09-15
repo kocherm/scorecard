@@ -34,11 +34,12 @@ def login(client, email):
     return client
 
 
-def test_rail_holds_three_destinations_not_nine(env):
+def test_rail_holds_four_destinations_not_nine(env):
     body = login(env, "b@x.co").get("/").text
     rail = body.split('<aside class="sidenav">')[1].split("</aside>")[0]
-    assert rail.count('class="nav-item') == 5      # Board, My numbers, Admin, account, sign out
-    for label in ("Board", "My numbers", "Admin"):
+    # Board, CEO metrics, My numbers, Admin, account, sign out
+    assert rail.count('class="nav-item') == 6
+    for label in ("Board", "CEO metrics", "My numbers", "Admin"):
         assert f"<span>{label}</span>" in rail
     # Every admin screen is behind the single Admin entry, not in the rail.
     for href in ADMIN_HREFS:

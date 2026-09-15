@@ -578,6 +578,25 @@ def grid_page(request: Request, user=Depends(require_viewer),
                   display_token=dbm.get_setting(real, "display_token"))
 
 
+@app.get("/ceo", response_class=HTMLResponse)
+def ceo_page(request: Request, user=Depends(require_viewer),
+             con: sqlite3.Connection = Depends(data_db_dep),
+             real: sqlite3.Connection = Depends(db_dep)):
+    """The seven CEO numbers as a page of their own, for everyone who can see
+    the board. Same CeoVM the TV view renders (grid.build_ceo over the board's
+    BoardRows, plus hidden-section slots via grid.ceo_rows), so the page and
+    the screen on the wall cannot disagree."""
+    now = datetime.now(timezone.utc)
+    vm = gridm.build_grid(con, now)
+    rows = gridm.ceo_rows(con, now, gridm._board_rows(con, vm))
+    return render(request, "ceo.html", user=user, vm=vm, active="ceo",
+                  ceo=gridm.build_ceo(con, rows),
+                  can_edit=user["role"] in ("editor", "admin"),
+                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1",
+                  on_tv="ceo" in _enabled_views(real),
+                  display_token=dbm.get_setting(real, "display_token"))
+
+
 def _metric_or_404(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
     m = con.execute("SELECT * FROM metrics WHERE id = ?", (metric_id,)).fetchone()
     if m is None:
@@ -658,6 +677,9 @@ def cell_save(metric_id: int, week: str, request: Request, value: str = Form(...
 # off a call. A metric measured in thousands is typed, not tapped, and the
 # field is right there.
 QUICK_STEP = 1
+# Pages other than the board that open the same dialog; a save from one of
+# them reloads that page instead of swapping a board row.
+QUICK_ORIGINS = ("ceo",)
 
 
 def _quick_points(con: sqlite3.Connection, metric_id: int, now: datetime):
@@ -687,7 +709,7 @@ def _quick_points(con: sqlite3.Connection, metric_id: int, now: datetime):
 
 def _quick_render(request: Request, con: sqlite3.Connection, metric_id: int,
                   week: str, *, err: Optional[str] = None,
-                  value: Optional[str] = None) -> HTMLResponse:
+                  value: Optional[str] = None, origin: str = "") -> HTMLResponse:
     now = datetime.now(timezone.utc)
     mvm, points = _quick_points(con, metric_id, now)
     if not points:
@@ -699,20 +721,22 @@ def _quick_render(request: Request, con: sqlite3.Connection, metric_id: int,
         "SELECT source FROM entry_audit WHERE metric_id = ? ORDER BY id DESC LIMIT 1",
         (metric_id,)).fetchone()
     return render(request, "_quick_edit.html", m=mvm, sel=sel, points=points,
-                  err=err, value=value, step=QUICK_STEP,
+                  err=err, value=value, step=QUICK_STEP, origin=origin,
                   api_written=bool(last and last["source"] == "api"))
 
 
 @app.get("/quick/{metric_id}", response_class=HTMLResponse)
 def quick_edit_form(metric_id: int, request: Request, week: str = "",
-                    user=Depends(require_editor),
+                    origin: str = "", user=Depends(require_editor),
                     con: sqlite3.Connection = Depends(data_db_dep)):
-    return _quick_render(request, con, metric_id, week)
+    return _quick_render(request, con, metric_id, week,
+                         origin=origin if origin in QUICK_ORIGINS else "")
 
 
 @app.post("/quick/{metric_id}/{week}", response_class=HTMLResponse)
 def quick_edit_save(metric_id: int, week: str, request: Request,
-                    value: str = Form(""), user=Depends(require_editor),
+                    value: str = Form(""), origin: str = Form(""),
+                    user=Depends(require_editor),
                     con: sqlite3.Connection = Depends(data_db_dep)):
     """Save and swap the row behind the dialog out of band.
 
@@ -727,8 +751,15 @@ def quick_edit_save(metric_id: int, week: str, request: Request,
     try:
         entry_ops.save_value(con, m, w, value, source="manual", user_id=actor)
     except ValueError as e:
-        return _quick_render(request, con, metric_id, week, err=str(e), value=value)
+        origin = origin if origin in QUICK_ORIGINS else ""
+        return _quick_render(request, con, metric_id, week, err=str(e), value=value,
+                             origin=origin)
     con.commit()
+    if origin in QUICK_ORIGINS:
+        # Not the board: there is no row to swap, and a CEO metric may sit in
+        # a hidden section _render_row cannot find. One number moves a ring,
+        # a ratio, the margin and the bars, so the page simply reloads.
+        return HTMLResponse("", headers={"HX-Refresh": "true"})
     # Empty body for #quickedit (the dialog goes away) plus the refreshed row,
     # which lands by id wherever it is on the board.
     return _render_row(request, con, user, metric_id)
@@ -1040,12 +1071,14 @@ def _check_display_token(con: sqlite3.Connection, token: str) -> None:
 
 
 @app.get("/tv")
-def tv_shortcut(con: sqlite3.Connection = Depends(db_dep)):
+def tv_shortcut(view: str = "", con: sqlite3.Connection = Depends(db_dep)):
     """Typeable shortcut for a TV/kiosk browser: looks up the current display
     token server-side and 302-redirects to /display. 302 (not 301/308) so the
-    redirect is never cached and keeps working after the token is rotated."""
+    redirect is never cached and keeps working after the token is rotated.
+    /tv?view=ceo is a screen that holds one view instead of rotating."""
     token = dbm.get_setting(con, "display_token") or ""
-    return RedirectResponse(f"/display?token={token}", status_code=302)
+    pin = f"&view={view}" if view in TV_VIEWS else ""
+    return RedirectResponse(f"/display?token={token}{pin}", status_code=302)
 
 
 def _tv_context(con: sqlite3.Connection):
@@ -1121,7 +1154,11 @@ def _tv_view(con: sqlite3.Connection, tv, now: datetime, override: str = "") -> 
     live = [v for v in enabled if _view_has_content(v, tv)]
     # The board's "+N" cell says where the rest went - only when true.
     tv.roster_rotates = seconds > 0 and "clients" in live and len(live) > 1
-    if override in enabled and _view_has_content(override, tv):
+    # A pin (?view=) is a person's explicit choice - "Show on TV" on a page, or
+    # a screen set up to hold one view - so it needs only to be a real view
+    # with something on it. Settings decides what an UNATTENDED TV rotates
+    # through; it does not veto a screen someone pointed at a view on purpose.
+    if override in TV_VIEWS and _view_has_content(override, tv):
         return override
     return wk.rotation_pick(now, live or ["board"], seconds) or "board"
 

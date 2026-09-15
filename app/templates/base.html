@@ -31,6 +31,8 @@
     <div class="nav-group">This week</div>
     <a href="/" class="nav-item {% if active == 'grid' %}active{% endif %}">
       {{ icon('grid') }}<span>Board</span></a>
+    <a href="/ceo" class="nav-item {% if active == 'ceo' %}active{% endif %}">
+      {{ icon('dollar') }}<span>CEO metrics</span></a>
     {% if user and user['role'] != 'viewer' %}
     <a href="/checkin" class="nav-item {% if active in ('checkin',) %}active{% endif %}">
       {{ icon('check') }}<span>My numbers</span>

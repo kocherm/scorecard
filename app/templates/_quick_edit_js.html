@@ -1,0 +1,28 @@
+<script>
+/* ---- quick edit dialog ----
+   The pencil swaps a <dialog> into #quickedit; showModal() is what puts it in
+   the top layer, above the sticky metric column and the horizontal scroll
+   that an inline popover would be trapped inside. */
+function qeOpen() {
+  var d = document.getElementById("qe-dlg");
+  if (d && !d.open) d.showModal();
+}
+function qeClose() {
+  var d = document.getElementById("qe-dlg");
+  if (d && d.open) d.close();
+  var box = document.getElementById("quickedit");
+  if (box) box.innerHTML = "";
+}
+/* Nudge the typed value without reaching for the keyboard - the whole point of
+   the pencil on a phone. It edits the FIELD and leaves saving to Save: every
+   write lands in entry_audit, so tapping + four times must not be four rows in
+   the metric's history. */
+function qeStep(n) {
+  var f = document.getElementById("qe-value");
+  if (!f) return;
+  var v = parseFloat(f.value);
+  if (isNaN(v)) v = 0;
+  f.value = String(Math.round((v + n) * 1e6) / 1e6);
+  f.focus();
+}
+</script>

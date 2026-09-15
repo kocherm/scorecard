@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{#- The seven CEO numbers as a page (main.ceo_page). The same CeoVM the TV's
+    "CEO metrics" view draws, arranged the same way - growth engine, unit
+    economics, bottom line - in the app's light theme instead of vh units, so
+    it works beside the sidebar and on a phone. Every tile is a real metric:
+    the pencil opens the board's quick editor (origin=ceo reloads this page
+    on save) and the name opens /m/{id}. -#}
+{% block title %}CEO metrics{% endblock %}
+{% block content %}
+{% set c = ceo %}
+<div class="page-head ceo-head">
+  <div>
+    <div class="eyebrow">{{ vm.quarter_label }} &middot; week of {{ vm.current_week.strftime('%B %-d, %Y') }}{% if demo_on %} &middot; demo data{% endif %}</div>
+    <h1>CEO metrics</h1>
+    <p class="page-sub">Seven numbers, read as one story: leads become customers become
+      revenue; what it costs to win and keep them; what is left.</p>
+  </div>
+  <div class="ceo-actions">
+    {% if display_token and c.mapped %}
+    <a class="btn secondary sm" href="/display?token={{ display_token }}&amp;view=ceo" target="_blank" rel="noopener">{{ icon('monitor') }} Show on TV</a>
+    {% endif %}
+    {% if user['role'] == 'admin' %}
+    <a class="btn secondary sm" href="/admin/settings?tab=display#ceo-view">Choose metrics</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if user['role'] == 'admin' %}
+  {% if not c.mapped %}
+  <div class="flash warn">None of the seven is tracked yet. Add them in one click under
+    <a href="/admin/metrics">Sections &amp; metrics &rsaquo; Start from a template</a>, or point
+    each one at a metric you already have under <a href="/admin/settings?tab=display#ceo-view">Settings &rsaquo; CEO view</a>.</div>
+  {% elif not on_tv %}
+  <p class="note ceo-tvnote">Not in the TV rotation. Tick &ldquo;CEO metrics&rdquo; under
+    <a href="/admin/settings?tab=display#tv-views">Settings &rsaquo; TV views</a>, or point a screen of its own at <span class="mono">/tv?view=ceo</span>.</p>
+  {% endif %}
+{% endif %}
+
+{% macro tile(t, hero=false) %}
+<article class="ceo-tile{% if hero %} hero{% endif %}{% if not t.row %} untracked{% endif %}">
+  <div class="ceo-tile-top">
+    <span class="ceo-label">{{ t.label }}</span>
+    {% if t.row and can_edit %}
+    <button type="button" class="mpen" hx-get="/quick/{{ t.row.metric_id }}?origin=ceo"
+            hx-target="#quickedit" hx-swap="innerHTML"
+            aria-label="Update {{ t.label }}" title="Update this number">{{ icon('pencil') }}</button>
+    {% endif %}
+  </div>
+  {% if t.row %}
+  {% set r = t.row %}
+  <div class="ceo-main">
+    <div class="ceo-ring {{ r.latest_state }}{% if t.pct is none %} none{% endif %}">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="track" cx="50" cy="50" r="45"/>
+        {% if t.dash is not none %}<circle class="fill" cx="50" cy="50" r="45" style="stroke-dasharray:{{ t.dash }} 283"/>{% endif %}
+      </svg>
+      <span class="ceo-pct">{% if t.pct is not none %}{{ t.pct_display }}{% else %}&mdash;{% endif %}</span>
+    </div>
+    <div class="ceo-numwrap">
+      <div class="ceo-num {{ r.latest_state }}" style="--len:{{ r.latest_display|length if r.latest_display != '-' else 1 }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
+      <div class="ceo-sub">
+        {%- if t.pct is not none %}{{ t.pct_note }}{% if r.target_display != '-' %} {{ r.target_display }}{% endif %}
+        {%- elif r.target_display != '-' %}target {{ r.target_display }}
+        {%- else %}no target set{% endif %}
+        {%- if r.week_note %} &middot; {{ r.week_note }}{% endif %}
+      </div>
+      {%- if r.red_streak >= 1 %}<span class="chip ceo-flag red">red wk {{ r.red_streak }}</span>
+      {%- elif r.latest_state == 'stale' %}<span class="chip ceo-flag">no data</span>
+      {%- elif r.latest_state == 'pending' and not r.week_note %}<span class="chip ceo-flag">awaiting entry</span>{% endif %}
+    </div>
+  </div>
+  <div class="ceo-foot">
+    <span class="spark" title="Last four closed weeks, then this week">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}<i class="now {{ r.cur_state }}"></i></span>
+    <a class="ceo-metric" href="/m/{{ r.metric_id }}">
+      {%- if r.dri_name != '-' %}<i class="av">{{ r.dri_name | initials }}</i>{{ r.dri_first }}{% else %}{{ r.name }}{% endif %}</a>
+  </div>
+  {% else %}
+  <p class="note ceo-empty">Not tracked yet.{% if user['role'] == 'admin' %} <a href="/admin/settings?tab=display#ceo-view">Map a metric</a>{% endif %}</p>
+  {% endif %}
+</article>
+{% endmacro %}
+
+{% macro link(value, label) %}
+<div class="ceo-link{% if not value %} empty{% endif %}" aria-hidden="{{ 'true' if not value else 'false' }}">
+  <span class="ceo-arrow"></span>
+  {% if value %}<b>{{ value }}</b><small>{{ label }}</small>{% endif %}
+</div>
+{% endmacro %}
+
+<section class="card ceo-band">
+  <div class="section-head"><span class="icon">{{ icon('trend') }}</span><h2>Growth engine</h2></div>
+  <div class="ceo-row growth">
+    {{ tile(c.tiles.leads) }}
+    {{ link(c.close_rate, 'close rate') }}
+    {{ tile(c.tiles.conversions) }}
+    {{ link(c.per_conversion, 'per new customer') }}
+    {{ tile(c.tiles.revenue, true) }}
+  </div>
+</section>
+
+<div class="ceo-split">
+  <section class="card ceo-band">
+    <div class="section-head"><span class="icon">{{ icon('users') }}</span><h2>Unit economics</h2></div>
+    <div class="ceo-row pair">
+      {{ tile(c.tiles.cac) }}
+      {{ tile(c.tiles.retention) }}
+    </div>
+  </section>
+
+  <section class="card ceo-band">
+    <div class="section-head"><span class="icon">{{ icon('dollar') }}</span><h2>Bottom line</h2>
+      {% if c.margin %}<span class="chip ceo-margin {{ c.margin_state }}">{{ c.margin }} margin</span>{% endif %}</div>
+    <div class="ceo-row pair">
+      {{ tile(c.tiles.expenses) }}
+      {{ tile(c.tiles.profit) }}
+    </div>
+    <div class="ceo-pl">
+      {% for b in c.bars %}
+      <div class="ceo-bar">
+        <span class="ceo-barname">{{ b.label }}</span>
+        <span class="ceo-bartrack"><i class="{{ b.cls }}{% if b.negative %} neg{% endif %}" style="width:{{ b.pct }}%"></i></span>
+        <span class="ceo-barval">{{ b.display }}</span>
+      </div>
+      {% else %}
+      <p class="note">Revenue, expenses and profit for the same week draw here as one picture.</p>
+      {% endfor %}
+      {% if c.bars %}<p class="note">{{ c.bars_note }}</p>{% endif %}
+    </div>
+  </section>
+</div>
+
+{% if can_edit %}<div id="quickedit"></div>{% include "_quick_edit_js.html" %}{% endif %}
+{% endblock %}

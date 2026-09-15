@@ -1732,6 +1732,86 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
    declared much further down (.status-body's min-width:0 among them), and
    at equal specificity the later rule wins - sitting this block up with
    the components it adjusts looks tidier and silently loses.  */
+/* ---------- CEO metrics page (/ceo) ----------
+   The TV view's arrangement in the light theme: growth engine full width,
+   unit economics and bottom line side by side. Colour is the state, as on
+   the board; the ring is share of target. */
+.ceo-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.ceo-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 18px; }
+.ceo-actions .btn svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.ceo-tvnote { margin: -8px 0 16px; }
+.ceo-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.ceo-band .section-head .chip { margin-left: auto; }
+.ceo-row { display: grid; align-items: stretch; }
+.ceo-row.growth { grid-template-columns: 1fr auto 1fr auto 1.2fr; }
+.ceo-row.pair { grid-template-columns: 1fr 1fr; }
+.ceo-tile { min-width: 0; padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+.ceo-row.pair .ceo-tile + .ceo-tile { border-left: 1px solid var(--pearl); }
+.ceo-tile.untracked { opacity: 0.6; }
+.ceo-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.ceo-label { font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--slate); }
+.ceo-tile .mpen { opacity: 1; }
+.ceo-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ceo-ring { position: relative; flex: none; width: 64px; height: 64px; color: var(--stale); }
+.hero .ceo-ring { width: 76px; height: 76px; }
+.ceo-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+.ceo-ring circle { fill: none; stroke-width: 9; }
+.ceo-ring .track { stroke: var(--pearl); }
+.ceo-ring.none .track { stroke-dasharray: 3 5; }
+.ceo-ring .fill { stroke: currentColor; stroke-linecap: round; }
+.ceo-ring.green { color: var(--green); }
+.ceo-ring.yellow { color: var(--amber); }
+.ceo-ring.red { color: var(--red); }
+.ceo-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; color: var(--ink-light); font-variant-numeric: tabular-nums; }
+/* The number never wraps: its size comes from its glyph count and the width
+   it actually has (cqw), the same fix the TV view needed for $ figures. */
+.ceo-numwrap { flex: 1 1 auto; min-width: 0; container-type: inline-size; }
+.ceo-num { --cap: 30px; font-size: min(var(--cap), calc(100cqw / (var(--len, 4) * 0.62)));
+  font-weight: 600; line-height: 1.1; color: var(--ink); white-space: nowrap;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.hero .ceo-num { --cap: 38px; }
+.ceo-num.green { color: var(--green-deep); }
+.ceo-num.yellow { color: var(--amber-deep); }
+.ceo-num.red { color: var(--red-deep); }
+.ceo-num.stale, .ceo-num.pending { color: var(--stale); }
+.ceo-sub { font-size: 12px; color: var(--silver); margin-top: 3px; }
+.ceo-flag { margin-top: 6px; background: var(--pearl); color: var(--slate); }
+.ceo-flag.red { background: var(--red-subtle); color: var(--red-deep); font-weight: 600; }
+.ceo-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
+.ceo-foot .spark { height: auto; align-items: center; }
+.ceo-foot .spark i.now { background: transparent; border: 2px solid var(--cloud); box-sizing: border-box; }
+.ceo-foot .spark i.now.green { border-color: var(--green); }
+.ceo-foot .spark i.now.yellow { border-color: var(--amber); }
+.ceo-foot .spark i.now.red { border-color: var(--red); }
+.ceo-metric { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--slate);
+  text-decoration: none; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ceo-metric:hover { color: var(--accent); }
+.ceo-metric .av { width: 18px; height: 18px; border-radius: 999px; flex: none; background: var(--navy); color: #fff;
+  font-size: 8.5px; font-weight: 600; font-style: normal; display: inline-flex; align-items: center; justify-content: center; }
+.ceo-empty { margin: 0; }
+.ceo-link { align-self: center; width: 96px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+.ceo-arrow { position: relative; width: 100%; height: 2px; background: var(--cloud); }
+.ceo-arrow::after { content: ""; position: absolute; right: 0; top: 50%; width: 8px; height: 8px;
+  border-top: 2px solid var(--cloud); border-right: 2px solid var(--cloud); transform: translate(0, -50%) rotate(45deg); }
+.ceo-link b { font-size: 16px; font-weight: 600; color: var(--navy); font-variant-numeric: tabular-nums; }
+.ceo-link small { font-size: 10px; color: var(--silver); letter-spacing: 0.06em; text-transform: uppercase; }
+.ceo-margin.green { background: var(--green-subtle); color: var(--green-deep); }
+.ceo-margin.yellow { background: var(--amber-subtle); color: var(--amber-deep); }
+.ceo-margin.red { background: var(--red-subtle); color: var(--red-deep); }
+.ceo-pl { border-top: 1px solid var(--pearl); padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ceo-pl .note { margin: 0; }
+.ceo-bar { display: grid; grid-template-columns: minmax(70px, 120px) 1fr auto; align-items: center; gap: 10px; font-size: 12.5px; }
+.ceo-barname { color: var(--slate); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ceo-bartrack { height: 10px; background: var(--pearl); border-radius: 999px; overflow: hidden; }
+.ceo-bartrack i { display: block; height: 100%; border-radius: 999px; background: var(--stale); }
+.ceo-bartrack i.revenue { background: var(--accent); }
+.ceo-bartrack i.expenses { background: var(--slate); }
+.ceo-bartrack i.green { background: var(--green); }
+.ceo-bartrack i.yellow { background: var(--amber); }
+.ceo-bartrack i.red, .ceo-bartrack i.neg { background: var(--red); }
+.ceo-barval { font-weight: 600; color: var(--ink-light); font-variant-numeric: tabular-nums; }
+
 @media (max-width: 760px) {
   .sidenav { width: 52px; padding: 12px 6px; }
   .sidenav .logo { justify-content: center; padding: 4px 0; margin-bottom: 12px; }
@@ -1754,4 +1834,17 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
      own line instead of squeezing the explanation to one word per line. */
   .status-row { flex-wrap: wrap; }
   .status-body { min-width: 55%; }
+}
+
+/* CEO page, narrow: the story reads top to bottom instead of left to right.
+   Kept at the end of the file so it beats the base rules above (CLAUDE.md). */
+@media (max-width: 1100px) {
+  .ceo-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .ceo-row.growth, .ceo-row.pair { grid-template-columns: 1fr; }
+  .ceo-row.pair .ceo-tile + .ceo-tile { border-left: none; border-top: 1px solid var(--pearl); }
+  .ceo-link { width: auto; flex-direction: row; justify-content: flex-start; gap: 8px; padding: 0 18px; }
+  .ceo-link .ceo-arrow { display: none; }
+  .ceo-link.empty { display: none; }
 }

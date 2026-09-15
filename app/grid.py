@@ -117,7 +117,10 @@ def _metric_info(m: sqlite3.Row) -> sc.MetricInfo:
 
 
 def build_grid(con: sqlite3.Connection, now: datetime,
-               include_archived: bool = False) -> GridVM:
+               include_archived: bool = False, hidden: bool = False) -> GridVM:
+    """`hidden=True` builds the HIDDEN sections instead of the visible ones -
+    only for the CEO view, whose slots may point into a section kept off the
+    board (see ceo_rows). Everything else reads the visible board."""
     tz = wk.BUSINESS_TZ
     today = now.astimezone(tz).date()
     from .db import get_setting
@@ -131,8 +134,8 @@ def build_grid(con: sqlite3.Connection, now: datetime,
     week_keys = [w.isoformat() for w in weeks]
 
     sections = con.execute(
-        "SELECT * FROM sections WHERE is_enabled = 1 ORDER BY sort_order, id"
-    ).fetchall()
+        "SELECT * FROM sections WHERE is_enabled = ? ORDER BY sort_order, id",
+        (0 if hidden else 1,)).fetchall()
     metrics_sql = """SELECT m.*, u.display_name AS dri_name FROM metrics m
                      LEFT JOIN users u ON u.id = m.dri_user_id
                      WHERE m.section_id = ? {arch} ORDER BY m.sort_order, m.id"""
@@ -568,19 +571,14 @@ def build_actions(con: sqlite3.Connection, vm: GridVM) -> list[ActionItem]:
     return actions
 
 
-def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
-    from .db import get_setting
-    vm = build_grid(con, now)
-
+def _board_rows(con: sqlite3.Connection, vm: GridVM) -> list[BoardRow]:
+    """The GridVM's rows as BoardRows: latest number, state, spark, target.
+    Shared by build_tv and ceo_rows so a tile can never read differently from
+    the same metric on the board."""
     def find_cell(row: Row, week: date) -> Optional[Cell]:
         return next((c for c in row.cells if c.week == week), None)
 
-    targets_by_metric: dict[int, Optional[float]] = {}
-    for t in con.execute("SELECT metric_id, year, quarter, baseline_value, stretch_value FROM targets"):
-        qt = sc.QuarterTargets(t["baseline_value"], t["stretch_value"])
-        if (t["year"], t["quarter"]) == wk.quarter_of(vm.current_week):
-            targets_by_metric[t["metric_id"]] = sc.target_for_week(vm.current_week, qt)
-
+    targets_by_metric = _current_targets(con, vm)
     rows: list[BoardRow] = []
     for section in vm.sections:
         for row in section.rows:
@@ -613,7 +611,42 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
                 target_raw=(targets_by_metric.get(row.metric_id)
                             if row.metric_type == "numeric" else None),
                 direction=row.direction, unit=row.unit))
+    return rows
 
+
+def _current_targets(con: sqlite3.Connection, vm: GridVM) -> dict[int, Optional[float]]:
+    out: dict[int, Optional[float]] = {}
+    for t in con.execute("SELECT metric_id, year, quarter, baseline_value, stretch_value FROM targets"):
+        if (t["year"], t["quarter"]) == wk.quarter_of(vm.current_week):
+            out[t["metric_id"]] = sc.target_for_week(
+                vm.current_week, sc.QuarterTargets(t["baseline_value"], t["stretch_value"]))
+    return out
+
+
+def ceo_rows(con: sqlite3.Connection, now: datetime, rows: list[BoardRow]) -> list[BoardRow]:
+    """`rows` plus any CEO-slot metric that lives in a HIDDEN section.
+
+    Hiding a section keeps it off the board, the check-in page and the
+    nudges; it does not mean the CEO cannot see it. Companies park revenue,
+    expenses and profit in a hidden section precisely because they are not
+    board material for everyone, and the CEO view is where they are read.
+    The hidden grid is built only when a slot actually points there."""
+    from . import ceo as ceom
+    have = {r.metric_id for r in rows}
+    missing = {mid for mid in ceom.resolve_slots(con).values()
+               if mid is not None and mid not in have}
+    if not missing:
+        return rows
+    hvm = build_grid(con, now, hidden=True)
+    return rows + [r for r in _board_rows(con, hvm) if r.metric_id in missing]
+
+
+def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
+    from .db import get_setting
+    vm = build_grid(con, now)
+
+    rows = _board_rows(con, vm)
+    targets_by_metric = _current_targets(con, vm)
 
     actions = build_actions(con, vm)
 
@@ -695,7 +728,7 @@ def build_tv(con: sqlite3.Connection, now: datetime) -> TvVM:
     return TvVM(vm=vm, mrr=mrr, columns=columns,
                 board_rows=board_rows, board_secs=board_secs,
                 actions=actions[:3], more_actions=max(0, len(actions) - 3),
-                rows=rows, ceo=build_ceo(con, rows),
+                rows=rows, ceo=build_ceo(con, ceo_rows(con, now, rows)),
                 roster=roster, roster_cols=_roster_cols(len(roster)))
 
 
