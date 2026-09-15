@@ -65,6 +65,9 @@
         {%- else %}no target set{% endif %}
         {%- if r.week_note %} &middot; {{ r.week_note }}{% endif %}
       </div>
+      {%- set bd = breakdowns.get(t.slot) %}
+      {%- if bd %}<button type="button" class="ceo-bdlink{% if bd.mismatch %} warn{% endif %}" onclick="bdOpen('{{ t.slot }}')"
+              aria-haspopup="dialog">{{ bd.items|length }} categories{% if bd.mismatch %} &middot; don&rsquo;t add up{% endif %} &rsaquo;</button>{% endif %}
       {%- if r.red_streak >= 1 %}<span class="chip ceo-flag red">red wk {{ r.red_streak }}</span>
       {%- elif r.latest_state == 'stale' %}<span class="chip ceo-flag">no data</span>
       {%- elif r.latest_state == 'pending' and not r.week_note %}<span class="chip ceo-flag">awaiting entry</span>{% endif %}
@@ -130,5 +133,84 @@
   </section>
 </div>
 
+{#- One dialog per broken-down tile, rendered with the page (the data is a
+    handful of rows) and opened by #bd-<slot>, so the reload after a save from
+    inside it lands back in it. Every number is for the week the tile shows;
+    grid.build_breakdowns explains why. -#}
+{% for slot, bd in breakdowns.items() %}
+<dialog class="qe ceo-dlg" id="bd-{{ slot }}" aria-labelledby="bd-{{ slot }}-title">
+  <div class="qe-head">
+    <div class="qe-titles">
+      <div class="qe-eyebrow">By category &middot; {{ bd.week_note }}</div>
+      <h2 class="qe-title" id="bd-{{ slot }}-title">{{ bd.label }}</h2>
+    </div>
+    <button type="button" class="qe-x" onclick="bdClose('{{ slot }}')" aria-label="Close">&times;</button>
+  </div>
+  <div class="bd-rows">
+    {% for it in bd.items %}
+    {% set r = it.row %}
+    <div class="bd-row{% if not it.counted %} missing{% endif %}">
+      <div class="bd-line">
+        <a class="bd-name" href="/m/{{ r.metric_id }}">{{ r.name }}</a>
+        <span class="bd-val {{ r.latest_state if it.counted else '' }}">{{ r.latest_display if it.counted else 'not entered' }}</span>
+        {% if can_edit %}
+        <button type="button" class="mpen" hx-get="/quick/{{ r.metric_id }}?origin=ceo{% if bd.week_note == 'this week' %}&amp;week={{ bd.week }}{% endif %}"
+                hx-target="#quickedit" hx-swap="innerHTML"
+                aria-label="Update {{ r.name }}" title="Update this number">{{ icon('pencil') }}</button>
+        {% endif %}
+      </div>
+      <div class="bd-line sub">
+        <span class="ceo-bartrack bd-share"><i class="{{ r.latest_state if it.counted else '' }}" style="width:{{ it.share_pct }}%"></i></span>
+        <span class="bd-pct">{{ it.share_display }}</span>
+        <span class="note bd-target">{% if r.target_display != '-' %}{{ 'budget' if r.direction == 'down' else 'target' }} {{ r.target_display }}{% else %}no target{% endif %}</span>
+        <span class="spark">{% for sp in r.spark %}<i class="{{ sp.state }}"></i>{% endfor %}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="bd-sum">
+    <span>Categories add up to <b>{{ bd.sum_display }}</b>{% if not bd.complete %} <span class="note">(not all entered)</span>{% endif %}</span>
+    {% if bd.total_display %}<span class="note">{{ bd.label }} reads {{ bd.total_display }}</span>{% endif %}
+  </div>
+  {% if bd.mismatch or (bd.complete and not bd.total_display) %}
+  <div class="bd-warn">
+    {% if bd.mismatch %}The categories and the {{ bd.label|lower }} total disagree for {{ bd.week_note }}.
+    {% else %}No {{ bd.label|lower }} total entered for {{ bd.week_note }} yet.{% endif %}
+    {% if can_edit %}
+    <form method="post" action="/ceo/{{ slot }}/total">
+      <input type="hidden" name="week" value="{{ bd.week }}">
+      <button class="btn sm" type="submit">Set {{ bd.label|lower }} to {{ bd.sum_display }}</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="qe-foot">
+    {% if user['role'] == 'admin' %}<a class="note" href="/admin/settings?tab=display#ceo-breakdown">Edit categories</a>{% endif %}
+    <button type="button" class="btn secondary sm" onclick="bdClose('{{ slot }}')">Close</button>
+  </div>
+</dialog>
+{% endfor %}
+{% if breakdowns %}
+<script>
+function bdOpen(slot) {
+  var d = document.getElementById("bd-" + slot);
+  if (!d) return;
+  if (!d.open) d.showModal();
+  history.replaceState(null, "", "#bd-" + slot);
+}
+function bdClose(slot) {
+  var d = document.getElementById("bd-" + slot);
+  if (d && d.open) d.close();
+}
+document.querySelectorAll("dialog.ceo-dlg").forEach(function (d) {
+  /* Esc and the X both land here: drop the hash so a reload opens nothing. */
+  d.addEventListener("close", function () {
+    history.replaceState(null, "", location.pathname + location.search);
+  });
+});
+var m = /^#bd-([a-z]+)$/.exec(location.hash);
+if (m) bdOpen(m[1]);
+</script>
+{% endif %}
 {% if can_edit %}<div id="quickedit"></div>{% include "_quick_edit_js.html" %}{% endif %}
 {% endblock %}

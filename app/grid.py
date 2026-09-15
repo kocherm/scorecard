@@ -633,8 +633,10 @@ def ceo_rows(con: sqlite3.Connection, now: datetime, rows: list[BoardRow]) -> li
     The hidden grid is built only when a slot actually points there."""
     from . import ceo as ceom
     have = {r.metric_id for r in rows}
-    missing = {mid for mid in ceom.resolve_slots(con).values()
-               if mid is not None and mid not in have}
+    wanted = {mid for mid in ceom.resolve_slots(con).values() if mid is not None}
+    for ids in ceom.all_breakdown_ids(con).values():
+        wanted.update(ids)
+    missing = wanted - have
     if not missing:
         return rows
     hvm = build_grid(con, now, hidden=True)
@@ -757,6 +759,28 @@ class CeoVM:
     bars_note: str        # which week the bars read from
 
 
+@dataclass
+class BreakdownItem:
+    row: BoardRow
+    counted: bool          # has a number for the tile's week
+    share_pct: float       # of the categories' sum, 0 when not counted
+    share_display: str
+
+
+@dataclass
+class Breakdown:
+    slot: str
+    label: str
+    week_note: str         # the week every number in the panel is read for
+    week: str              # its Monday, for "use the sum"
+    items: list            # BreakdownItem, in saved order
+    sum_display: str
+    sum_raw: Optional[float]
+    complete: bool         # every category has a number for that week
+    total_display: str     # the tile's own number, '' when not entered
+    mismatch: bool         # complete, total entered, and they disagree
+
+
 _RING = 2 * 3.14159265 * 45   # circumference of the r=45 ring in _view_ceo.html
 
 
@@ -770,6 +794,47 @@ def _share_of_target(r: BoardRow) -> Optional[float]:
     else:
         ratio = r.latest_raw / r.target_raw
     return max(0.0, min(100.0, ratio * 100))
+
+
+def build_breakdowns(con: sqlite3.Connection, ceo: "CeoVM", rows: list[BoardRow],
+                     now: datetime) -> dict:
+    """slot -> Breakdown for every tile that has categories.
+
+    Every number is read for ONE week - the week the tile itself shows - so
+    shares and the sum-vs-total check never mix this week's tax with last
+    week's contractors. A category not entered for that week is listed but not
+    counted, and the sum is marked incomplete rather than quietly low."""
+    from . import ceo as ceom
+    by_id = {r.metric_id: r for r in rows}
+    out = {}
+    for slot, ids in ceom.all_breakdown_ids(con).items():
+        tile = ceo.tiles.get(slot)
+        cats = [by_id[i] for i in ids if i in by_id]
+        if tile is None or tile.row is None or not cats:
+            continue
+        parent = tile.row
+        note = parent.week_note or "last week"
+        week = (wk.current_week(now) if note == "this week" else wk.last_closed_week(now))
+        counted = [r for r in cats if r.week_note == note and r.latest_raw is not None]
+        total = sum(r.latest_raw for r in counted) if counted else None
+        items = []
+        for r in cats:
+            ok = r in counted
+            pct = (abs(r.latest_raw) / sum(abs(c.latest_raw) for c in counted) * 100
+                   if ok and total and any(c.latest_raw for c in counted) else 0.0)
+            items.append(BreakdownItem(row=r, counted=ok, share_pct=round(pct, 1),
+                                       share_display=(f"{pct:.0f}%" if ok else "")))
+        complete = len(counted) == len(cats)
+        has_total = parent.latest_raw is not None and parent.week_note == note
+        out[slot] = Breakdown(
+            slot=slot, label=tile.label, week_note=note, week=week.isoformat(),
+            items=items,
+            sum_display=(fmt_value("numeric", parent.unit, total) if total is not None else "-"),
+            sum_raw=total, complete=complete,
+            total_display=(parent.latest_display if has_total else ""),
+            mismatch=bool(complete and has_total and total is not None
+                          and abs(parent.latest_raw - total) >= 0.5))
+    return out
 
 
 def build_ceo(con: sqlite3.Connection, rows: list[BoardRow]) -> CeoVM:

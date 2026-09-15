@@ -192,3 +192,91 @@ def install_template(con: sqlite3.Connection, now: datetime,
         dbm.set_setting(con, setting_key(s.key), str(cur.lastrowid))
         created.append(s.label)
     return InstallResult(section_id=section_id, created=created, skipped=skipped)
+
+
+# ------------------------------------------------------------- breakdowns
+# A slot can be broken down into CATEGORIES: ordinary metrics in the slot
+# metric's own section (so a hidden "money" section keeps them hidden too),
+# linked by an ordered id list in settings (ceo_breakdown_<slot>), the same way
+# a slot is linked to its metric. Only additive slots offer one: expenses by
+# category, revenue by service line, leads by source add up to the tile. CAC by
+# channel or retention by cohort do not sum, so a share-of-total bar would lie.
+BREAKDOWN_SLOTS = ("expenses", "revenue", "leads")
+
+
+def breakdown_key(slot: str) -> str:
+    return f"ceo_breakdown_{slot}"
+
+
+def breakdown_ids(con: sqlite3.Connection, slot: str) -> list[int]:
+    """The slot's categories, in their saved order, live numeric metrics only
+    (an archived category simply drops out rather than dangling)."""
+    raw = dbm.get_setting(con, breakdown_key(slot)) or ""
+    ids = [int(p) for p in raw.split(",") if p.strip().isdigit()]
+    if not ids:
+        return []
+    live = {r["id"] for r in con.execute(
+        f"""SELECT id FROM metrics WHERE archived_at IS NULL AND metric_type = 'numeric'
+            AND id IN ({','.join('?' * len(ids))})""", ids)}
+    return [i for i in ids if i in live]
+
+
+def all_breakdown_ids(con: sqlite3.Connection) -> dict[str, list[int]]:
+    return {s: breakdown_ids(con, s) for s in BREAKDOWN_SLOTS}
+
+
+def _save_ids(con: sqlite3.Connection, slot: str, ids: list[int]) -> None:
+    dbm.set_setting(con, breakdown_key(slot), ",".join(str(i) for i in ids))
+
+
+def add_category(con: sqlite3.Connection, slot: str, name: str,
+                 now: datetime) -> int:
+    """Create a category metric shaped like the slot's metric (unit, rollup,
+    direction, owner, section) and append it. Raises ValueError with a
+    showable message; never creates a duplicate name within the slot."""
+    if slot not in BREAKDOWN_SLOTS:
+        raise ValueError("That tile has no breakdown")
+    name = " ".join(name.split())
+    if not name:
+        raise ValueError("Give the category a name")
+    parent_id = resolve_slots(con).get(slot)
+    if parent_id is None:
+        raise ValueError(f"Map a metric to {SLOT_BY_KEY[slot].label} first")
+    parent = con.execute("SELECT * FROM metrics WHERE id = ?", (parent_id,)).fetchone()
+    ids = breakdown_ids(con, slot)
+    if ids and con.execute(
+            f"""SELECT 1 FROM metrics WHERE lower(name) = lower(?)
+                AND id IN ({','.join('?' * len(ids))})""", [name, *ids]).fetchone():
+        raise ValueError(f"{name} is already a category")
+    mx = con.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM metrics "
+                     "WHERE section_id = ?", (parent["section_id"],)).fetchone()["n"]
+    cur = con.execute(
+        """INSERT INTO metrics (section_id, name, metric_type, rollup, direction,
+                                unit, dri_user_id, start_week, sort_order)
+           VALUES (?,?,'numeric',?,?,?,?,?,?)""",
+        (parent["section_id"], name, parent["rollup"] or "sum", parent["direction"],
+         parent["unit"], parent["dri_user_id"],
+         min(parent["start_week"], wk.current_week(now).isoformat()), mx))
+    _save_ids(con, slot, ids + [cur.lastrowid])
+    return cur.lastrowid
+
+
+def remove_category(con: sqlite3.Connection, slot: str, metric_id: int) -> None:
+    """Unlink only. The metric and its history stay; archive it from
+    Sections & metrics if it should go altogether."""
+    _save_ids(con, slot, [i for i in breakdown_ids(con, slot) if i != metric_id])
+
+
+def resolve_category(con: sqlite3.Connection, slot: str, ref) -> Optional[int]:
+    """A category by metric id or by name (case-insensitive). Automations send
+    whichever they have - n8n usually knows the name it mapped, not our id."""
+    ids = breakdown_ids(con, slot)
+    s = str(ref).strip()
+    if s.isdigit() and int(s) in ids:
+        return int(s)
+    for r in con.execute(
+            f"SELECT id, name FROM metrics WHERE id IN ({','.join('?' * len(ids))})"
+            if ids else "SELECT id, name FROM metrics WHERE 0", ids):
+        if r["name"].strip().lower() == s.lower():
+            return r["id"]
+    return None

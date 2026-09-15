@@ -165,6 +165,35 @@
     <button class="btn" type="submit" style="margin-top:12px">Save</button>
   </form>
 </div>
+<div class="panel" id="ceo-breakdown" style="max-width:640px">
+  {% if saved == "ceo-breakdown" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
+  {% if ceo_breakdown_err %}<div class="flash err">{{ ceo_breakdown_err }}</div>{% endif %}
+  <h2>CEO view &middot; categories</h2>
+  <details class="why"><summary>How categories work</summary>
+  <p class="note">Break a tile down into the parts that add up to it &mdash; expenses by category, revenue by service line, leads by source. On the CEO metrics page, clicking the tile opens each part with its share, its target and its last few weeks, and says when the parts no longer add up to the total. The TV view stays as it is. Each category is an ordinary metric created in the same section as the tile&rsquo;s metric, with the same unit and owner, so it can be given a target and written by an automation through <span class="mono">POST /api/v1/ceo/&lt;tile&gt;/breakdown</span>. Removing a category here only unlinks it; its history stays.</p></details>
+  {% for slot in ['expenses', 'revenue', 'leads'] %}
+  {% set cats = ceo_breakdowns[slot] %}
+  <div class="bd-slot">
+    <div class="bd-slot-head"><b>{{ slot|capitalize }}</b>
+      <span class="note">{% if cats %}{{ cats|length }} categor{{ 'y' if cats|length == 1 else 'ies' }}{% else %}not broken down{% endif %}</span></div>
+    {% if cats %}
+    <ul class="bd-cats">
+      {% for mid, nm in cats %}
+      <li><a href="/m/{{ mid }}">{{ nm or ('metric ' ~ mid) }}</a>
+        <form method="post" action="/admin/settings/ceo-breakdown/{{ slot }}/remove">
+          <input type="hidden" name="metric_id" value="{{ mid }}">
+          <button class="bd-x" title="Unlink {{ nm }} (its history stays)" aria-label="Unlink {{ nm }}">&times;</button>
+        </form></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" action="/admin/settings/ceo-breakdown/{{ slot }}/add" class="bd-add">
+      <input type="text" name="name" required placeholder="New {{ slot }} category" aria-label="New {{ slot }} category">
+      <button class="btn secondary sm" type="submit">Add</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
 <div class="panel" id="display-window" style="max-width:640px">
   {% if saved == "display-window" %}<div class="flash ok saved-flash">Saved.</div>{% endif %}
   <h2>Display window</h2>

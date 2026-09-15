@@ -144,6 +144,19 @@ Slack app manifest). Check `git grep` before every commit.
   instead of _render_row. A TV pin (?view=, /tv?view=ceo) only has to name a
   real view with content - Settings > TV views decides what an UNATTENDED
   screen rotates through, not what a person pointed one at.
+- A CEO tile can be BROKEN DOWN (ceo.BREAKDOWN_SLOTS: expenses, revenue,
+  leads - the ones that SUM; CAC by channel does not add up to CAC, so a
+  share bar would lie). Categories are ordinary metrics created in the tile
+  metric's section with its unit/owner/direction, linked by an ordered id
+  list in settings (ceo_breakdown_<slot>), exactly as a slot is linked to its
+  metric. The panel on /ceo reads every number for the ONE week the tile
+  shows (grid.build_breakdowns); the TV view ignores breakdowns on purpose.
+  POST /api/v1/ceo/{slot}/breakdown is the automation path and is
+  all-or-nothing: every name is resolved before anything is written, unknown
+  names are refused rather than created, and total="sum" writes the tile only
+  when every category has a number that week - a short sum written
+  confidently is worse than no total. "Use the sum" on the page applies the
+  same rule and recomputes from entries, never from the form.
 - A long client list is absorbed in three steps, in this order, and the order
   is the design (grid._layout_board): a roster section (every row R/Y/G) first
   WIDENS into up to MAX_SUBCOLS sub-columns, then folds its greenest rows into

@@ -589,12 +589,41 @@ def ceo_page(request: Request, user=Depends(require_viewer),
     now = datetime.now(timezone.utc)
     vm = gridm.build_grid(con, now)
     rows = gridm.ceo_rows(con, now, gridm._board_rows(con, vm))
+    ceo = gridm.build_ceo(con, rows)
     return render(request, "ceo.html", user=user, vm=vm, active="ceo",
-                  ceo=gridm.build_ceo(con, rows),
+                  ceo=ceo, breakdowns=gridm.build_breakdowns(con, ceo, rows, now),
+                  breakdown_slots=ceom.BREAKDOWN_SLOTS,
                   can_edit=user["role"] in ("editor", "admin"),
                   demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1",
                   on_tv="ceo" in _enabled_views(real),
                   display_token=dbm.get_setting(real, "display_token"))
+
+
+@app.post("/ceo/{slot}/total")
+def ceo_total_from_breakdown(slot: str, request: Request, week: str = Form(...),
+                             user=Depends(require_editor),
+                             con: sqlite3.Connection = Depends(data_db_dep)):
+    """"Use the sum": write the tile's total as its categories added up, for
+    one week. Recomputed here from the entries - never trusted from the form -
+    and refused unless every category has a number, so a half-entered week
+    cannot become a confidently wrong total."""
+    if slot not in ceom.BREAKDOWN_SLOTS:
+        raise HTTPException(404)
+    w = wk.parse_week(week)
+    ids = ceom.breakdown_ids(con, slot)
+    parent_id = ceom.resolve_slots(con).get(slot)
+    if not ids or parent_id is None:
+        raise HTTPException(404)
+    vals = [r["value_numeric"] for r in con.execute(
+        f"""SELECT value_numeric FROM entries WHERE week_start = ?
+            AND value_numeric IS NOT NULL AND metric_id IN ({','.join('?' * len(ids))})""",
+        [w.isoformat(), *ids])]
+    if len(vals) != len(ids):
+        raise HTTPException(422, "Every category needs a number for that week first")
+    actor = _data_actor_id(con, _real_actor(request, user))
+    dbm.upsert_entry(con, parent_id, w, value_numeric=sum(vals),
+                     source="manual", user_id=actor)
+    return RedirectResponse(f"/ceo#bd-{slot}", status_code=303)
 
 
 def _metric_or_404(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
@@ -1957,6 +1986,9 @@ def admin_settings(request: Request, saved: str = "", tab: str = "",
                   goal_metrics=goal_metrics,
                   ceo_slot_defs=ceom.SLOTS,
                   ceo_slots=ceom.explicit_slots(con),
+                  ceo_breakdowns={k: [(i, names.get(i)) for i in ids]
+                                  for k, ids in ceom.all_breakdown_ids(con).items()},
+                  ceo_breakdown_err=request.query_params.get("bd_err", ""),
                   ceo_detected={k: names.get(v) for k, v in ceom.resolve_slots(con).items()},
                   hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
                   mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
@@ -1978,7 +2010,7 @@ def _slack_verify(con: sqlite3.Connection) -> readiness.Check:
 # never be rendered in one tab and redirected to another.
 SETTINGS_TABS = {
     "tv-display": "display", "tv-views": "display", "screensaver": "display",
-    "goal-band": "display", "ceo-view": "display", "display-window": "display",
+    "goal-band": "display", "ceo-view": "display", "ceo-breakdown": "display", "display-window": "display",
     "slack": "notify", "nudges": "notify", "channels": "notify",
     "demo": "advanced",
 }
@@ -2005,6 +2037,25 @@ def save_goal_band(hud_mrr_metric_id: str = Form(""), mrr_goal: str = Form(""),
     dbm.set_setting(con, "mrr_goal", mrr_goal.strip())
     dbm.set_setting(con, "mrr_milestones", mrr_milestones.strip())
     return _settings_saved("goal-band")
+
+
+@app.post("/admin/settings/ceo-breakdown/{slot}/add")
+def add_ceo_category(slot: str, name: str = Form(""), user=Depends(require_admin),
+                     con: sqlite3.Connection = Depends(db_dep)):
+    try:
+        ceom.add_category(con, slot, name, datetime.now(timezone.utc))
+    except ValueError as e:
+        return RedirectResponse(
+            f"/admin/settings?tab=display&bd_err={quote_plus(str(e))}#ceo-breakdown",
+            status_code=303)
+    return _settings_saved("ceo-breakdown")
+
+
+@app.post("/admin/settings/ceo-breakdown/{slot}/remove")
+def remove_ceo_category(slot: str, metric_id: int = Form(...), user=Depends(require_admin),
+                        con: sqlite3.Connection = Depends(db_dep)):
+    ceom.remove_category(con, slot, metric_id)
+    return _settings_saved("ceo-breakdown")
 
 
 @app.post("/admin/settings/ceo-view")

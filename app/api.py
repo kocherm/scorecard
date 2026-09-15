@@ -8,6 +8,17 @@ POST /api/v1/metrics/{id}/entries  {"week_start": "YYYY-MM-DD" (a Monday, option
 POST /api/v1/metrics/{id}/archive    {"effective_week": "YYYY-MM-DD" (a Monday,
                                       optional, defaults to this week)}  admin scope
 POST /api/v1/metrics/{id}/unarchive  admin scope
+GET  /api/v1/ceo                 the seven CEO slots, the metric filling each,
+                                 and each breakdown's categories (ids + names)
+POST /api/v1/ceo/{slot}/breakdown  {"week_start": optional Monday,
+                                    "categories": {"<name or id>": number, ...},
+                                    "total": "sum" (default) | number | null}
+                                 one week of categories in ONE call - the shape
+                                 an accounting export (QuickBooks -> n8n) or a
+                                 finance agent already has. All-or-nothing:
+                                 every name is checked before anything is
+                                 written. "sum" writes the tile's total only
+                                 when every category has a number that week.
 
 Archiving is the soft delete behind "remove this client": history is preserved,
 but the row leaves every surface (board, edit grid, API, alerts) outright,
@@ -150,15 +161,7 @@ def write_entry(metric_id: int, body: EntryIn, request: Request,
         raise HTTPException(404, "Unknown or archived metric")
 
     now = datetime.now(timezone.utc)
-    if body.week_start:
-        try:
-            week = wk.parse_week(body.week_start)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-    else:
-        week = wk.last_closed_week(now)
-    if week > wk.current_week(now):
-        raise HTTPException(422, "Cannot write a future week")
+    week = _week_or_422(body.week_start, now)
     if week < wk.parse_week(m["start_week"]):
         raise HTTPException(422, f"Metric starts {m['start_week']}")
 
@@ -177,6 +180,126 @@ def write_entry(metric_id: int, body: EntryIn, request: Request,
                          source="api", token_id=token["id"])
     return {"ok": True, "metric_id": metric_id, "week_start": week.isoformat(),
             "week_label": wk.quarter_label(week)}
+
+
+def _week_or_422(week_start: Optional[str], now: datetime):
+    if week_start:
+        try:
+            week = wk.parse_week(week_start)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+    else:
+        week = wk.last_closed_week(now)
+    if week > wk.current_week(now):
+        raise HTTPException(422, "Cannot write a future week")
+    return week
+
+
+# ------------------------------------------------------------ CEO metrics
+def ceo_state(con: sqlite3.Connection) -> dict:
+    from . import ceo as ceom
+    mapping = ceom.resolve_slots(con)
+    names = {r["id"]: r for r in con.execute(
+        "SELECT id, name, unit FROM metrics WHERE archived_at IS NULL")}
+    slots = []
+    for s in ceom.SLOTS:
+        mid = mapping.get(s.key)
+        slot = {"slot": s.key, "label": s.label,
+                "metric_id": mid, "metric_name": names[mid]["name"] if mid in names else None,
+                "unit": names[mid]["unit"] if mid in names else s.unit}
+        if s.key in ceom.BREAKDOWN_SLOTS:
+            slot["breakdown"] = [{"metric_id": i, "name": names[i]["name"],
+                                  "unit": names[i]["unit"]}
+                                 for i in ceom.breakdown_ids(con, s.key) if i in names]
+        slots.append(slot)
+    return {"slots": slots}
+
+
+@router.get("/ceo")
+def ceo_slots(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    api_token_from_request(request, con, need_write=False)
+    return ceo_state(con)
+
+
+class BreakdownIn(BaseModel):
+    week_start: Optional[str] = None
+    categories: dict[str, Optional[float]]
+    total: Optional[object] = "sum"
+
+
+@router.post("/ceo/{slot}/breakdown")
+def write_breakdown(slot: str, body: BreakdownIn, request: Request,
+                    con: sqlite3.Connection = Depends(db_dep)):
+    """Write one week of a tile's categories, and optionally its total.
+
+    Validates EVERYTHING before writing anything: a nightly export that names
+    one category wrong must fail loudly and leave the week as it was, not land
+    two of three numbers and a total that no longer adds up. Unknown names are
+    refused, never created - a typo in an n8n mapping must not grow a fourth
+    category. Every write is an ordinary API entry, audited to the token."""
+    from . import ceo as ceom
+    token = api_token_from_request(request, con, need_write=True)
+    if slot not in ceom.BREAKDOWN_SLOTS:
+        raise HTTPException(404, f"No breakdown for {slot!r}; "
+                                 f"one of {', '.join(ceom.BREAKDOWN_SLOTS)}")
+    now = datetime.now(timezone.utc)
+    week = _week_or_422(body.week_start, now)
+    ids = ceom.breakdown_ids(con, slot)
+    if not ids:
+        raise HTTPException(409, f"{slot} has no categories yet - add them in "
+                                 "Admin > Settings > CEO view")
+    if not body.categories:
+        raise HTTPException(422, "categories is empty")
+    resolved, unknown = {}, []
+    for ref, value in body.categories.items():
+        mid = ceom.resolve_category(con, slot, ref)
+        if mid is None:
+            unknown.append(ref)
+        elif value is None:
+            raise HTTPException(422, f"{ref}: value is required (send 0 for none)")
+        else:
+            resolved[mid] = float(value)
+    if unknown:
+        valid = [r["name"] for r in con.execute(
+            f"SELECT name FROM metrics WHERE id IN ({','.join('?' * len(ids))})", ids)]
+        raise HTTPException(422, {"error": "unknown categories", "unknown": unknown,
+                                  "categories": valid})
+    total = body.total
+    if not (total is None or total == "sum" or isinstance(total, (int, float))):
+        raise HTTPException(422, 'total must be "sum", a number, or null')
+    parent_id = ceom.resolve_slots(con).get(slot)
+    starts = {r["id"]: r["start_week"] for r in con.execute(
+        f"SELECT id, start_week FROM metrics WHERE id IN ({','.join('?' * (len(ids) + 1))})",
+        [*ids, parent_id or 0])}
+    for mid in [*resolved, *([parent_id] if total is not None and parent_id else [])]:
+        if week < wk.parse_week(starts[mid]):
+            raise HTTPException(422, f"Metric {mid} starts {starts[mid]}")
+
+    for mid, v in resolved.items():
+        dbm.upsert_entry(con, mid, week, value_numeric=v, source="api", token_id=token["id"])
+
+    have = {r["metric_id"]: r["value_numeric"] for r in con.execute(
+        f"""SELECT metric_id, value_numeric FROM entries WHERE week_start = ?
+            AND value_numeric IS NOT NULL AND metric_id IN ({','.join('?' * len(ids))})""",
+        [week.isoformat(), *ids])}
+    missing = [i for i in ids if i not in have]
+    written_total = None
+    if total is not None and parent_id is not None:
+        if total == "sum":
+            if not missing:
+                written_total = sum(have.values())
+        else:
+            written_total = float(total)
+        if written_total is not None:
+            dbm.upsert_entry(con, parent_id, week, value_numeric=written_total,
+                             source="api", token_id=token["id"])
+    names = {r["id"]: r["name"] for r in con.execute(
+        f"SELECT id, name FROM metrics WHERE id IN ({','.join('?' * len(ids))})", ids)}
+    return {"ok": True, "slot": slot, "week_start": week.isoformat(),
+            "written": [{"metric_id": m, "name": names[m], "value": v}
+                        for m, v in resolved.items()],
+            "missing": [names[i] for i in missing],
+            "total_metric_id": parent_id, "total_written": written_total}
 
 
 class ArchiveIn(BaseModel):
