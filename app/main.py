@@ -29,6 +29,7 @@ from migrate import passkeys as passkeys_migration
 from . import (alerts, ceo as ceom, channels, db as dbm, demo, entry_ops,
                grid as gridm, passkeys, readiness, weeks as wk)
 from .api import router as api_router
+from .api_docs import router as api_docs_router
 from .mcp import router as mcp_router
 from .inbound import router as inbound_router
 from .slack import router as slack_router
@@ -153,12 +154,16 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Aprendio Scorecard", lifespan=lifespan, docs_url=None, redoc_url=None)
+# openapi_url=None: the default schema described every route (admin forms,
+# login, webhooks). The API's own schema and docs page come from app/api_docs.py.
+app = FastAPI(title="Aprendio Scorecard", lifespan=lifespan, docs_url=None, redoc_url=None,
+              openapi_url=None)
 # Python's mimetypes table has no .webmanifest entry, so StaticFiles would serve
 # the manifest as text/plain and Firefox would refuse to parse it.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 app.include_router(api_router)
+app.include_router(api_docs_router)
 app.include_router(mcp_router)
 app.include_router(slack_router)
 app.include_router(inbound_router)

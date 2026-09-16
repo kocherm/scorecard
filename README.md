@@ -207,75 +207,27 @@ troubleshooting runbook.
 
 ## Agent / automation API
 
+A bearer-token JSON API reads the scored board and writes weekly numbers, for
+n8n, Zapier, scripts and AI agents. The full reference, with every endpoint,
+error and a QuickBooks-to-n8n recipe, is **[docs/API.md](docs/API.md)**; a
+running instance also serves an interactive reference at `/api/docs` and the
+OpenAPI schema at `/api/v1/openapi.json` (committed as
+[docs/openapi.json](docs/openapi.json)).
+
 ```bash
-# full scored state: values, colors, stale list, red streaks, escalation levels
+# the whole board, scored
 curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/scorecard
 
-# list metric ids (add ?include_archived=true to see archived ones too)
-curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/metrics
-
-# write a value (week_start optional, defaults to the week that is due)
+# write last week's number for metric 2
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"week_start": "2026-07-06", "value": 12}' \
-  https://scorecard.example.com/api/v1/metrics/1/entries
-
-# retire a row - the soft delete behind "this client churned". Needs an
-# admin-scoped token. History is kept, and the row leaves every surface (board,
-# edit grid, API, alerts) regardless of the date below. effective_week records
-# *when* they left; it only changes what a view passing include_archived would
-# render, which today is nothing. Set it honestly, don't expect a display change.
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"effective_week": "2026-06-29"}' \
-  https://scorecard.example.com/api/v1/metrics/9/archive
-
-# undo it
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  https://scorecard.example.com/api/v1/metrics/9/unarchive
+  -d '{"value": 12}' https://scorecard.example.com/api/v1/metrics/2/entries
 ```
 
-### CEO metrics and their categories
-
-A CEO tile (Revenue, Expenses, Leads) can be broken down into categories under
-Admin > Settings > CEO view - expenses by category, say. An accounting export
-or a finance agent usually has a whole week of categories at once, so it sends
-them in one call instead of one request per metric:
-
-```bash
-# which metric fills each tile, and each breakdown's categories
-curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/ceo
-
-# a week of expense categories, by name (or metric id), plus the tile's total
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"week_start": "2026-09-07",
-       "categories": {"Payroll": 18000, "Contractors": 6500, "Other": 1200},
-       "total": "sum"}' \
-  https://scorecard.example.com/api/v1/ceo/expenses/breakdown
-```
-
-- `week_start` is optional and defaults to the week that is due, like `/entries`.
-- It is all-or-nothing: a category name that does not exist is refused with the
-  list of valid ones, and nothing is written. Unknown names are never created,
-  so a typo in an n8n mapping cannot grow a new category.
-- `total`: `"sum"` (the default) writes the tile's total as the categories added
-  up, but only once every category has a number for that week; the response's
-  `missing` says which are still outstanding. Send a number to write the total
-  your books report, or `null` to leave it alone. The CEO page flags a week
-  whose categories and total disagree.
-- Categories you leave out of a call are left as they are, so separate flows
-  can each send their own part of the same week.
-- Like every API write, the numbers are attributed to the token, and a later
-  call for the same week replaces them.
-
-A typical pipeline: QuickBooks (or your bookkeeping tool) -> an n8n schedule
-that maps its expense accounts onto these category names -> this endpoint with
-a `write` token. A finance agent does the same with the same token.
-
-Tokens are created in Admin > API, shown once, revocable. Scopes: `read`,
-`write`, `read_write`, and `admin`. Only `admin` may archive - entering a bad
-number is loud and stays on the board, but a row that quietly disappears is
-not, so taking one off the board is deliberately a higher privilege than
-writing to it. API-written cells are attributed to the token in the audit
-trail.
+Tokens are created on Admin > API tokens, shown once, and scoped `read`,
+`write`, `read_write` or `admin` (only `admin` may archive a metric). Every
+API write is attributed to its token in the audit trail. After changing an
+endpoint, regenerate the schema with
+`uv run python -m app.api_docs > docs/openapi.json`; a test fails until you do.
 
 ## Brand assets
 

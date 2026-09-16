@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Security
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, Field
 
 from . import db as dbm
 from . import grid as gridm
@@ -43,7 +44,153 @@ from . import weeks as wk
 from .auth import api_token_from_request
 from .db import db_dep
 
-router = APIRouter(prefix="/api/v1")
+# Documentation only: auto_error=False, so authentication stays in
+# api_token_from_request (its 401/403 messages, its scope rules). This just
+# puts the bearer scheme and the lock icon into the OpenAPI schema.
+bearer = HTTPBearer(auto_error=False, description="An API token (starts with sc_) "
+                    "from Admin > API tokens.")
+router = APIRouter(prefix="/api/v1", dependencies=[Security(bearer)])
+
+
+# ------------------------------------------------ documented response shapes
+# Used ONLY as `responses=` documentation, never as response_model: a model
+# filters what it does not declare, and the builders here are shared with the
+# MCP server, so the schema must describe the output, not reshape it.
+class Error(BaseModel):
+    detail: Union[str, dict, list] = Field(
+        description="A message, or for unknown breakdown categories an object "
+                    "listing them; request-shape errors return FastAPI's list form.")
+
+
+class CellOut(BaseModel):
+    state: Optional[str] = Field(None, description="green, yellow, red, stale, pending, "
+                                 "no-target, or na (before the metric started)")
+    value: Union[float, str, None] = Field(None, description="The number, or R/Y/G for status metrics")
+
+
+class MetricStateOut(BaseModel):
+    id: int
+    name: str
+    type: Literal["numeric", "binary", "status"]
+    unit: Optional[str] = Field(None, examples=["$"])
+    dri: str = Field(description="Owner's display name, '-' when unowned")
+    target: str = Field(description="This week's target, formatted; '-' when none")
+    last_closed_week: CellOut
+    current_week: CellOut
+    red_streak: int = Field(description="Consecutive closed weeks in red")
+    escalation_level: int = Field(description="0 none, 1 file a 1-3-1, 2 1:1, 3 structural")
+    one_three_one_filed: bool
+    trend: list[str] = Field(description="States of the last four closed weeks, oldest first")
+
+
+class SectionOut(BaseModel):
+    name: str
+    metrics: list[MetricStateOut]
+
+
+class PersonRef(BaseModel):
+    id: int = Field(description="Metric id")
+    name: str = Field(description="Metric name")
+    dri: str
+    dri_slack_member_id: Optional[str] = None
+
+
+class RedRef(PersonRef):
+    weeks_red: int
+    one_three_one_filed: bool
+
+
+class ScorecardOut(BaseModel):
+    current_week: str = Field(examples=["2026-09-14"])
+    current_week_label: str = Field(examples=["Q3-W11"])
+    last_closed_week: str = Field(examples=["2026-09-07"])
+    entries_due_by: str = Field(description="Deadline for last closed week's numbers")
+    stale_after: str = Field(description="When a still-missing number turns stale")
+    sections: list[SectionOut]
+    pending: list[PersonRef] = Field(description="Missing, deadline not yet passed")
+    stale: list[PersonRef] = Field(description="Missing, deadline passed")
+    red: list[RedRef]
+
+
+class MetricListItem(BaseModel):
+    id: int
+    name: str
+    metric_type: Literal["numeric", "binary", "status"]
+    unit: Optional[str] = None
+    archived_at: Optional[str] = None
+    section: str
+    dri: Optional[str] = None
+
+
+class EntryOut(BaseModel):
+    ok: bool = True
+    metric_id: int
+    week_start: str = Field(examples=["2026-09-07"])
+    week_label: str = Field(examples=["Q3-W10"])
+
+
+class CategoryOut(BaseModel):
+    metric_id: int
+    name: str
+    unit: Optional[str] = None
+
+
+class CeoSlotOut(BaseModel):
+    slot: Literal["revenue", "expenses", "leads", "conversions", "cac", "retention", "profit"]
+    label: str
+    metric_id: Optional[int] = Field(None, description="null when no metric fills the tile")
+    metric_name: Optional[str] = None
+    unit: Optional[str] = None
+    breakdown: Optional[list[CategoryOut]] = Field(
+        None, description="Present only on tiles that can be broken down "
+                          "(revenue, expenses, leads); empty until categories are added")
+
+
+class CeoOut(BaseModel):
+    slots: list[CeoSlotOut]
+
+
+class WrittenOut(BaseModel):
+    metric_id: int
+    name: str
+    value: float
+
+
+class BreakdownOut(BaseModel):
+    ok: bool = True
+    slot: str
+    week_start: str
+    written: list[WrittenOut]
+    missing: list[str] = Field(description="Categories with no number for this week yet")
+    total_metric_id: Optional[int] = None
+    total_written: Optional[float] = Field(
+        None, description="The total written to the tile, or null when none was written")
+
+
+class ArchiveOut(BaseModel):
+    ok: bool = True
+    metric_id: int
+    name: str
+    archived: Literal[True] = True
+    was_already_archived: bool
+    effective_week: str
+    effective_week_label: str
+
+
+class UnarchiveOut(BaseModel):
+    ok: bool = True
+    metric_id: int
+    name: str
+    archived: Literal[False] = False
+    was_archived: bool
+
+
+def _errors(*codes: int) -> dict:
+    text = {400: "Bad request", 401: "Missing or invalid token",
+            403: "Token scope too low", 404: "Not found",
+            409: "Conflict with current configuration",
+            422: "Invalid input (see detail)"}
+    return {c: {"model": Error, "description": text[c]} for c in codes}
 
 
 def _read_token(request: Request, con: sqlite3.Connection = Depends(db_dep)):
@@ -120,7 +267,12 @@ def build_scorecard(con: sqlite3.Connection, now: datetime) -> dict:
     return out
 
 
-@router.get("/scorecard")
+@router.get("/scorecard", tags=["Scorecard"], summary="Get the scored scorecard",
+            responses={200: {"model": ScorecardOut}, **_errors(401)},
+            description="Every visible metric with its target, last closed and current "
+                        "week, trend and red streak, plus ready-made pending, stale and "
+                        "red lists. Scored by the same engine as the board and the TV. "
+                        "Any token scope.")
 def scorecard_state(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
     return build_scorecard(con, datetime.now(timezone.utc))
@@ -138,21 +290,33 @@ def metrics_rows(con: sqlite3.Connection, include_archived: bool = False) -> lis
     return [dict(r) for r in rows]
 
 
-@router.get("/metrics")
-def list_metrics(request: Request, include_archived: bool = False,
+@router.get("/metrics", tags=["Metrics"], summary="List metrics",
+            responses={200: {"model": list[MetricListItem]}, **_errors(401)},
+            description="Ids and names to write to. Includes metrics in hidden "
+                        "sections. Any token scope.")
+def list_metrics(request: Request,
+                 include_archived: bool = Query(False, description="Also list archived metrics"),
                  con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
     return metrics_rows(con, include_archived)
 
 
 class EntryIn(BaseModel):
-    week_start: Optional[str] = None
-    value: Optional[float] = None
-    status: Optional[str] = None
+    week_start: Optional[str] = Field(
+        None, description="Monday of the week (YYYY-MM-DD). Defaults to the last closed week.",
+        examples=["2026-09-07"])
+    value: Optional[float] = Field(None, description="Required for numeric and binary "
+                                   "metrics (binary: any non-zero is yes)", examples=[12])
+    status: Optional[str] = Field(None, description='Required for status metrics: "R", "Y" or "G"')
 
 
-@router.post("/metrics/{metric_id}/entries")
-def write_entry(metric_id: int, body: EntryIn, request: Request,
+@router.post("/metrics/{metric_id}/entries", tags=["Metrics"], summary="Write a weekly value",
+             responses={200: {"model": EntryOut}, **_errors(401, 403, 404, 422)},
+             description="Sets the metric's value for one week, replacing any value "
+                         "already there (including one typed by hand). Idempotent: "
+                         "sending the same week again overwrites it. Needs a write, "
+                         "read_write or admin token.")
+def write_entry(body: EntryIn, request: Request, metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
                 con: sqlite3.Connection = Depends(db_dep)):
     token = api_token_from_request(request, con, need_write=True)
     m = con.execute("SELECT * FROM metrics WHERE id = ? AND archived_at IS NULL",
@@ -215,20 +379,41 @@ def ceo_state(con: sqlite3.Connection) -> dict:
     return {"slots": slots}
 
 
-@router.get("/ceo")
+@router.get("/ceo", tags=["CEO metrics"], summary="List CEO tiles and categories",
+            responses={200: {"model": CeoOut}, **_errors(401)},
+            description="The seven CEO tiles, the metric filling each, and the "
+                        "categories of tiles that are broken down. Use it to find the "
+                        "names a breakdown call accepts. Any token scope.")
 def ceo_slots(request: Request, con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_write=False)
     return ceo_state(con)
 
 
 class BreakdownIn(BaseModel):
-    week_start: Optional[str] = None
-    categories: dict[str, Optional[float]]
-    total: Optional[object] = "sum"
+    week_start: Optional[str] = Field(
+        None, description="Monday of the week (YYYY-MM-DD). Defaults to the last closed week.",
+        examples=["2026-09-07"])
+    categories: dict[str, Optional[float]] = Field(
+        description="Category name (case-insensitive) or metric id -> amount. Send 0 "
+                    "for none. Categories left out keep their current value.",
+        examples=[{"Payroll": 18000, "Contractors": 6500, "Other": 1200}])
+    total: Union[float, Literal["sum"], None] = Field(
+        "sum", description='"sum" writes the tile total as the categories added up, '
+                           "only once every category has a number for the week; a "
+                           "number writes that total; null leaves the total alone.")
 
 
-@router.post("/ceo/{slot}/breakdown")
-def write_breakdown(slot: str, body: BreakdownIn, request: Request,
+@router.post("/ceo/{slot}/breakdown", tags=["CEO metrics"],
+             summary="Write a week of categories",
+             responses={200: {"model": BreakdownOut}, **_errors(401, 403, 404, 409, 422)},
+             description="Writes one week of a tile's categories in a single call, and "
+                         "optionally its total. All-or-nothing: every category name is "
+                         "checked first, and an unknown name writes nothing and returns "
+                         "the valid names. Names are never created. `slot` is revenue, "
+                         "expenses or leads. Needs a write, read_write or admin token.")
+def write_breakdown(body: BreakdownIn, request: Request,
+                    slot: str = Path(description="The tile: revenue, expenses or leads",
+                                     examples=["expenses"]),
                     con: sqlite3.Connection = Depends(db_dep)):
     """Write one week of a tile's categories, and optionally its total.
 
@@ -268,12 +453,13 @@ def write_breakdown(slot: str, body: BreakdownIn, request: Request,
     if not (total is None or total == "sum" or isinstance(total, (int, float))):
         raise HTTPException(422, 'total must be "sum", a number, or null')
     parent_id = ceom.resolve_slots(con).get(slot)
-    starts = {r["id"]: r["start_week"] for r in con.execute(
-        f"SELECT id, start_week FROM metrics WHERE id IN ({','.join('?' * (len(ids) + 1))})",
+    starts = {r["id"]: r for r in con.execute(
+        f"SELECT id, name, start_week FROM metrics WHERE id IN ({','.join('?' * (len(ids) + 1))})",
         [*ids, parent_id or 0])}
     for mid in [*resolved, *([parent_id] if total is not None and parent_id else [])]:
-        if week < wk.parse_week(starts[mid]):
-            raise HTTPException(422, f"Metric {mid} starts {starts[mid]}")
+        if week < wk.parse_week(starts[mid]["start_week"]):
+            raise HTTPException(422, f"{starts[mid]['name']} starts "
+                                     f"{starts[mid]['start_week']}; nothing was written")
 
     for mid, v in resolved.items():
         dbm.upsert_entry(con, mid, week, value_numeric=v, source="api", token_id=token["id"])
@@ -303,7 +489,9 @@ def write_breakdown(slot: str, body: BreakdownIn, request: Request,
 
 
 class ArchiveIn(BaseModel):
-    effective_week: Optional[str] = None
+    effective_week: Optional[str] = Field(
+        None, description="Monday the metric stopped being tracked. Defaults to this week.",
+        examples=["2026-06-29"])
 
 
 def _metric_row(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
@@ -313,8 +501,12 @@ def _metric_row(con: sqlite3.Connection, metric_id: int) -> sqlite3.Row:
     return m
 
 
-@router.post("/metrics/{metric_id}/archive")
-def archive_metric(metric_id: int, request: Request,
+@router.post("/metrics/{metric_id}/archive", tags=["Admin"], summary="Archive a metric",
+             responses={200: {"model": ArchiveOut}, **_errors(401, 403, 404, 422)},
+             description="Takes a metric (for example a churned client) off every "
+                         "surface while keeping its history. Calling it again moves the "
+                         "effective week. Needs an admin token.")
+def archive_metric(request: Request, metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
                    body: Optional[ArchiveIn] = None,
                    con: sqlite3.Connection = Depends(db_dep)):
     """Take a metric off the board from effective_week onward, keeping history.
@@ -350,8 +542,10 @@ def archive_metric(metric_id: int, request: Request,
             "effective_week_label": wk.quarter_label(week)}
 
 
-@router.post("/metrics/{metric_id}/unarchive")
-def unarchive_metric(metric_id: int, request: Request,
+@router.post("/metrics/{metric_id}/unarchive", tags=["Admin"], summary="Restore a metric",
+             responses={200: {"model": UnarchiveOut}, **_errors(401, 403, 404)},
+             description="Puts an archived metric back. Needs an admin token.")
+def unarchive_metric(request: Request, metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
                      con: sqlite3.Connection = Depends(db_dep)):
     api_token_from_request(request, con, need_admin=True)
     m = _metric_row(con, metric_id)

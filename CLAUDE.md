@@ -53,6 +53,19 @@ Slack app manifest). Check `git grep` before every commit.
   shared credential, so a write would show up in Activity as "the Claude token"
   instead of the person. Its tools call app/api.py's build_scorecard /
   metrics_rows - never a second query path.
+- The API is documented in three places that must agree, and a test holds
+  them together (tests/test_api_docs.py): docs/API.md (the written reference,
+  one "### METHOD /path" section per endpoint), docs/openapi.json (generated:
+  `uv run python -m app.api_docs > docs/openapi.json`), and the live
+  /api/v1/openapi.json + /api/docs from app/api_docs.py. The schema is built
+  from the /api/v1 router ONLY and the app-wide /openapi.json is off
+  (openapi_url=None): the default described every admin form and webhook.
+  Response models in app/api.py are passed as `responses=` documentation,
+  NEVER response_model - a model silently drops undeclared keys, and those
+  builders are shared with the MCP server. HTTPBearer there is auto_error=False
+  and exists only to put the scheme in the schema; auth stays in
+  api_token_from_request. Bump api_docs.VERSION and the API.md changelog when
+  the contract changes.
 - app/readiness.py backs Admin > Setup & status. Two tiers, and the split is the
   whole design: local checks read settings/DB only and run on every admin page
   load (they drive the nav badge); network checks call Slack and run ONLY from

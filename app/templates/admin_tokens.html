@@ -4,7 +4,7 @@
 <div class="page-head">
   <div class="eyebrow">Admin</div>
   <h1>API tokens</h1>
-  <p class="page-sub">Bearer tokens for Hermes, n8n, and other integrations. <span class="mono">GET /api/v1/scorecard</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/entries</span> &middot; <span class="mono">POST /api/v1/metrics/&#123;id&#125;/archive</span> (admin scope only)</p>
+  <p class="page-sub">Bearer tokens for n8n, AI agents and other integrations. Give each one its own token with the lowest scope it needs: <b>read</b> to look, <b>write</b> to report numbers, <b>admin</b> only to archive metrics. <a href="/api/docs" target="_blank" rel="noopener">API reference &rarr;</a></p>
 </div>
 {% if new_token %}
 <div class="flash ok">Token <strong>{{ new_name }}</strong> {{ new_label }}: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.{% if new_label == 'rotated' %} Paste it into the integration; the old secret keeps working until it expires, and this page flags it if anything is still calling with it.{% endif %}

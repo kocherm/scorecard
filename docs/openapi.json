@@ -1,0 +1,1446 @@
+{
+  "components": {
+    "schemas": {
+      "ArchiveIn": {
+        "properties": {
+          "effective_week": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monday the metric stopped being tracked. Defaults to this week.",
+            "examples": [
+              "2026-06-29"
+            ],
+            "title": "Effective Week"
+          }
+        },
+        "title": "ArchiveIn",
+        "type": "object"
+      },
+      "ArchiveOut": {
+        "properties": {
+          "archived": {
+            "const": true,
+            "default": true,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "effective_week": {
+            "title": "Effective Week",
+            "type": "string"
+          },
+          "effective_week_label": {
+            "title": "Effective Week Label",
+            "type": "string"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "was_already_archived": {
+            "title": "Was Already Archived",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "metric_id",
+          "name",
+          "was_already_archived",
+          "effective_week",
+          "effective_week_label"
+        ],
+        "title": "ArchiveOut",
+        "type": "object"
+      },
+      "BreakdownIn": {
+        "properties": {
+          "categories": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Category name (case-insensitive) or metric id -> amount. Send 0 for none. Categories left out keep their current value.",
+            "examples": [
+              {
+                "Contractors": 6500,
+                "Other": 1200,
+                "Payroll": 18000
+              }
+            ],
+            "title": "Categories",
+            "type": "object"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "const": "sum",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "sum",
+            "description": "\"sum\" writes the tile total as the categories added up, only once every category has a number for the week; a number writes that total; null leaves the total alone.",
+            "title": "Total"
+          },
+          "week_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monday of the week (YYYY-MM-DD). Defaults to the last closed week.",
+            "examples": [
+              "2026-09-07"
+            ],
+            "title": "Week Start"
+          }
+        },
+        "required": [
+          "categories"
+        ],
+        "title": "BreakdownIn",
+        "type": "object"
+      },
+      "BreakdownOut": {
+        "properties": {
+          "missing": {
+            "description": "Categories with no number for this week yet",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "string"
+          },
+          "total_metric_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Metric Id"
+          },
+          "total_written": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The total written to the tile, or null when none was written",
+            "title": "Total Written"
+          },
+          "week_start": {
+            "title": "Week Start",
+            "type": "string"
+          },
+          "written": {
+            "items": {
+              "$ref": "#/components/schemas/WrittenOut"
+            },
+            "title": "Written",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slot",
+          "week_start",
+          "written",
+          "missing"
+        ],
+        "title": "BreakdownOut",
+        "type": "object"
+      },
+      "CategoryOut": {
+        "properties": {
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "metric_id",
+          "name"
+        ],
+        "title": "CategoryOut",
+        "type": "object"
+      },
+      "CellOut": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "green, yellow, red, stale, pending, no-target, or na (before the metric started)",
+            "title": "State"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number, or R/Y/G for status metrics",
+            "title": "Value"
+          }
+        },
+        "title": "CellOut",
+        "type": "object"
+      },
+      "CeoOut": {
+        "properties": {
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/CeoSlotOut"
+            },
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slots"
+        ],
+        "title": "CeoOut",
+        "type": "object"
+      },
+      "CeoSlotOut": {
+        "properties": {
+          "breakdown": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CategoryOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present only on tiles that can be broken down (revenue, expenses, leads); empty until categories are added",
+            "title": "Breakdown"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when no metric fills the tile",
+            "title": "Metric Id"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "slot": {
+            "enum": [
+              "revenue",
+              "expenses",
+              "leads",
+              "conversions",
+              "cac",
+              "retention",
+              "profit"
+            ],
+            "title": "Slot",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "slot",
+          "label"
+        ],
+        "title": "CeoSlotOut",
+        "type": "object"
+      },
+      "EntryIn": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for status metrics: \"R\", \"Y\" or \"G\"",
+            "title": "Status"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for numeric and binary metrics (binary: any non-zero is yes)",
+            "examples": [
+              12
+            ],
+            "title": "Value"
+          },
+          "week_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monday of the week (YYYY-MM-DD). Defaults to the last closed week.",
+            "examples": [
+              "2026-09-07"
+            ],
+            "title": "Week Start"
+          }
+        },
+        "title": "EntryIn",
+        "type": "object"
+      },
+      "EntryOut": {
+        "properties": {
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "week_label": {
+            "examples": [
+              "Q3-W10"
+            ],
+            "title": "Week Label",
+            "type": "string"
+          },
+          "week_start": {
+            "examples": [
+              "2026-09-07"
+            ],
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric_id",
+          "week_start",
+          "week_label"
+        ],
+        "title": "EntryOut",
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "description": "A message, or for unknown breakdown categories an object listing them; request-shape errors return FastAPI's list form.",
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MetricListItem": {
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "dri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dri"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "metric_type": {
+            "enum": [
+              "numeric",
+              "binary",
+              "status"
+            ],
+            "title": "Metric Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "metric_type",
+          "section"
+        ],
+        "title": "MetricListItem",
+        "type": "object"
+      },
+      "MetricStateOut": {
+        "properties": {
+          "current_week": {
+            "$ref": "#/components/schemas/CellOut"
+          },
+          "dri": {
+            "description": "Owner's display name, '-' when unowned",
+            "title": "Dri",
+            "type": "string"
+          },
+          "escalation_level": {
+            "description": "0 none, 1 file a 1-3-1, 2 1:1, 3 structural",
+            "title": "Escalation Level",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_closed_week": {
+            "$ref": "#/components/schemas/CellOut"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "one_three_one_filed": {
+            "title": "One Three One Filed",
+            "type": "boolean"
+          },
+          "red_streak": {
+            "description": "Consecutive closed weeks in red",
+            "title": "Red Streak",
+            "type": "integer"
+          },
+          "target": {
+            "description": "This week's target, formatted; '-' when none",
+            "title": "Target",
+            "type": "string"
+          },
+          "trend": {
+            "description": "States of the last four closed weeks, oldest first",
+            "items": {
+              "type": "string"
+            },
+            "title": "Trend",
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "numeric",
+              "binary",
+              "status"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "$"
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "dri",
+          "target",
+          "last_closed_week",
+          "current_week",
+          "red_streak",
+          "escalation_level",
+          "one_three_one_filed",
+          "trend"
+        ],
+        "title": "MetricStateOut",
+        "type": "object"
+      },
+      "PersonRef": {
+        "properties": {
+          "dri": {
+            "title": "Dri",
+            "type": "string"
+          },
+          "dri_slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dri Slack Member Id"
+          },
+          "id": {
+            "description": "Metric id",
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Metric name",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "dri"
+        ],
+        "title": "PersonRef",
+        "type": "object"
+      },
+      "RedRef": {
+        "properties": {
+          "dri": {
+            "title": "Dri",
+            "type": "string"
+          },
+          "dri_slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dri Slack Member Id"
+          },
+          "id": {
+            "description": "Metric id",
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Metric name",
+            "title": "Name",
+            "type": "string"
+          },
+          "one_three_one_filed": {
+            "title": "One Three One Filed",
+            "type": "boolean"
+          },
+          "weeks_red": {
+            "title": "Weeks Red",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "dri",
+          "weeks_red",
+          "one_three_one_filed"
+        ],
+        "title": "RedRef",
+        "type": "object"
+      },
+      "ScorecardOut": {
+        "properties": {
+          "current_week": {
+            "examples": [
+              "2026-09-14"
+            ],
+            "title": "Current Week",
+            "type": "string"
+          },
+          "current_week_label": {
+            "examples": [
+              "Q3-W11"
+            ],
+            "title": "Current Week Label",
+            "type": "string"
+          },
+          "entries_due_by": {
+            "description": "Deadline for last closed week's numbers",
+            "title": "Entries Due By",
+            "type": "string"
+          },
+          "last_closed_week": {
+            "examples": [
+              "2026-09-07"
+            ],
+            "title": "Last Closed Week",
+            "type": "string"
+          },
+          "pending": {
+            "description": "Missing, deadline not yet passed",
+            "items": {
+              "$ref": "#/components/schemas/PersonRef"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
+          "red": {
+            "items": {
+              "$ref": "#/components/schemas/RedRef"
+            },
+            "title": "Red",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "stale": {
+            "description": "Missing, deadline passed",
+            "items": {
+              "$ref": "#/components/schemas/PersonRef"
+            },
+            "title": "Stale",
+            "type": "array"
+          },
+          "stale_after": {
+            "description": "When a still-missing number turns stale",
+            "title": "Stale After",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_week",
+          "current_week_label",
+          "last_closed_week",
+          "entries_due_by",
+          "stale_after",
+          "sections",
+          "pending",
+          "stale",
+          "red"
+        ],
+        "title": "ScorecardOut",
+        "type": "object"
+      },
+      "SectionOut": {
+        "properties": {
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricStateOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "metrics"
+        ],
+        "title": "SectionOut",
+        "type": "object"
+      },
+      "UnarchiveOut": {
+        "properties": {
+          "archived": {
+            "const": false,
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "was_archived": {
+            "title": "Was Archived",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "metric_id",
+          "name",
+          "was_archived"
+        ],
+        "title": "UnarchiveOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WrittenOut": {
+        "properties": {
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "metric_id",
+          "name",
+          "value"
+        ],
+        "title": "WrittenOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "description": "An API token (starts with sc_) from Admin > API tokens.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Read the company scorecard and write weekly numbers into it.\n\n**Authentication.** Send an API token as `Authorization: Bearer sc_...`.\nTokens are created on Admin > API tokens and shown once. Scopes: `read`\n(GET only), `write` and `read_write` (GET and writes), `admin` (everything,\nincluding archiving).\n\n**Weeks.** A week is identified by its Monday, `YYYY-MM-DD`, in the business\ntimezone. Writes default to the last closed week, the one that is due. Future\nweeks and weeks before a metric started are refused.\n\n**Writes replace.** Writing a week sets its value, replacing any previous\nvalue, including one typed by hand. Re-sending is safe. Every write is\nrecorded in the audit trail against the token.\n\nFull reference with examples: `docs/API.md` in the repository.\n",
+    "title": "Scorecard API",
+    "version": "1.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/ceo": {
+      "get": {
+        "description": "The seven CEO tiles, the metric filling each, and the categories of tiles that are broken down. Use it to find the names a breakdown call accepts. Any token scope.",
+        "operationId": "ceo_slots_api_v1_ceo_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List CEO tiles and categories",
+        "tags": [
+          "CEO metrics"
+        ]
+      }
+    },
+    "/api/v1/ceo/{slot}/breakdown": {
+      "post": {
+        "description": "Writes one week of a tile's categories in a single call, and optionally its total. All-or-nothing: every category name is checked first, and an unknown name writes nothing and returns the valid names. Names are never created. `slot` is revenue, expenses or leads. Needs a write, read_write or admin token.",
+        "operationId": "write_breakdown_api_v1_ceo__slot__breakdown_post",
+        "parameters": [
+          {
+            "description": "The tile: revenue, expenses or leads",
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "description": "The tile: revenue, expenses or leads",
+              "examples": [
+                "expenses"
+              ],
+              "title": "Slot",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakdownIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BreakdownOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Write a week of categories",
+        "tags": [
+          "CEO metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "Ids and names to write to. Includes metrics in hidden sections. Any token scope.",
+        "operationId": "list_metrics_api_v1_metrics_get",
+        "parameters": [
+          {
+            "description": "Also list archived metrics",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list archived metrics",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MetricListItem"
+                  },
+                  "title": "Response 200 List Metrics Api V1 Metrics Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List metrics",
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/{metric_id}/archive": {
+      "post": {
+        "description": "Takes a metric (for example a churned client) off every surface while keeping its history. Calling it again moves the effective week. Needs an admin token.",
+        "operationId": "archive_metric_api_v1_metrics__metric_id__archive_post",
+        "parameters": [
+          {
+            "description": "Metric id from GET /api/v1/metrics",
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "description": "Metric id from GET /api/v1/metrics",
+              "title": "Metric Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ArchiveIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Archive a metric",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/metrics/{metric_id}/entries": {
+      "post": {
+        "description": "Sets the metric's value for one week, replacing any value already there (including one typed by hand). Idempotent: sending the same week again overwrites it. Needs a write, read_write or admin token.",
+        "operationId": "write_entry_api_v1_metrics__metric_id__entries_post",
+        "parameters": [
+          {
+            "description": "Metric id from GET /api/v1/metrics",
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "description": "Metric id from GET /api/v1/metrics",
+              "title": "Metric Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Write a weekly value",
+        "tags": [
+          "Metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/{metric_id}/unarchive": {
+      "post": {
+        "description": "Puts an archived metric back. Needs an admin token.",
+        "operationId": "unarchive_metric_api_v1_metrics__metric_id__unarchive_post",
+        "parameters": [
+          {
+            "description": "Metric id from GET /api/v1/metrics",
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "description": "Metric id from GET /api/v1/metrics",
+              "title": "Metric Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnarchiveOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Restore a metric",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/scorecard": {
+      "get": {
+        "description": "Every visible metric with its target, last closed and current week, trend and red streak, plus ready-made pending, stale and red lists. Scored by the same engine as the board and the TV. Any token scope.",
+        "operationId": "scorecard_state_api_v1_scorecard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorecardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get the scored scorecard",
+        "tags": [
+          "Scorecard"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "The scored board, as data.",
+      "name": "Scorecard"
+    },
+    {
+      "description": "List metrics and write weekly values.",
+      "name": "Metrics"
+    },
+    {
+      "description": "The seven CEO tiles and their category breakdowns.",
+      "name": "CEO metrics"
+    },
+    {
+      "description": "Structural changes. Admin tokens only.",
+      "name": "Admin"
+    }
+  ]
+}
