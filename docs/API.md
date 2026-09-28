@@ -1,10 +1,12 @@
 # Scorecard API reference
 
-Version 1.1 &middot; Base path `/api/v1` &middot; JSON over HTTPS
+Version 1.2 &middot; Base path `/api/v1` &middot; JSON over HTTPS
 
 The Scorecard API lets integrations read the scored company scorecard and write
 weekly numbers into it: an n8n flow copying figures from your accounting tool,
 a script posting yesterday's sales, or an AI agent reporting what it measured.
+With an `admin` token it can also do the quarterly jobs: add people, add and
+reassign metrics, and set targets.
 Everything the API returns is scored by the same engine as the board and the TV,
 so an integration never sees a different colour from the one on the wall.
 
@@ -32,6 +34,14 @@ Examples use `https://scorecard.example.com` and a token in `$TOKEN`.
   - [POST /ceo/{slot}/breakdown](#post-ceoslotbreakdown)
   - [POST /metrics/{metric_id}/archive](#post-metricsmetric_idarchive)
   - [POST /metrics/{metric_id}/unarchive](#post-metricsmetric_idunarchive)
+  - [GET /users](#get-users)
+  - [POST /users](#post-users)
+  - [PATCH /users/{user_id}](#patch-usersuser_id)
+  - [GET /sections](#get-sections)
+  - [POST /sections](#post-sections)
+  - [POST /metrics](#post-metrics)
+  - [PATCH /metrics/{metric_id}](#patch-metricsmetric_id)
+  - [PUT /metrics/{metric_id}/targets](#put-metricsmetric_idtargets)
 - [Recipes](#recipes)
 - [MCP server](#mcp-server)
 - [Changelog](#changelog)
@@ -72,12 +82,23 @@ Tokens start with `sc_`. Admins create, rotate and revoke them on
 **Admin > API tokens**. Only a hash is stored, so a lost token cannot be shown
 again; rotate it instead.
 
-| Scope        | Read (`GET`) | Write values | Archive / unarchive |
-|--------------|:------------:|:------------:|:-------------------:|
-| `read`       | yes          | no           | no                  |
-| `write`      | yes          | yes          | no                  |
-| `read_write` | yes          | yes          | no                  |
-| `admin`      | yes          | yes          | yes                 |
+| Scope        | Read (`GET`) | Write values | Admin endpoints |
+|--------------|:------------:|:------------:|:---------------:|
+| `read`       | yes          | no           | no              |
+| `write`      | yes          | yes          | no              |
+| `read_write` | yes          | yes          | no              |
+| `admin`      | yes          | yes          | yes             |
+
+The admin endpoints are everything tagged *Admin*: people, sections, metric
+definitions and owners, targets, and archiving. `GET /users` and
+`GET /sections` are admin-only too, since they list email addresses and hidden
+sections.
+
+**Admin accounts are managed in the app only.** The API can create and change
+editors and viewers, but it cannot create an admin, promote anyone to admin,
+or change an admin's account in any way. Otherwise a leaked token could turn
+itself into a signed-in admin, for example by pointing an admin's Slack id at
+another person and requesting a password reset.
 
 Give each integration its own token with the lowest scope it needs. The audit
 trail and the "automated" label on Sections & metrics name the token that wrote
@@ -160,7 +181,7 @@ Errors use standard HTTP status codes and a JSON body with a `detail` field.
 | `401`  | No token, or the token is invalid, expired or revoked |
 | `403`  | The token's scope is too low (`"Token is read-only"`, `"Token lacks admin scope"`) |
 | `404`  | Unknown metric, or a tile that cannot be broken down |
-| `409`  | The request conflicts with configuration (a breakdown with no categories yet) |
+| `409`  | The request conflicts with what exists: a duplicate email, section or metric name; an admin account; a breakdown with no categories yet |
 | `422`  | The request is well-formed but not acceptable (bad week, missing value, unknown category) |
 
 `detail` is usually a sentence:
@@ -270,14 +291,16 @@ curl -H "Authorization: Bearer $TOKEN" \
 ```json
 [
   {"id": 1, "name": "New qualified conversations", "metric_type": "numeric",
-   "unit": null, "archived_at": null, "section": "Sales Activity", "dri": "Jordan Lee"},
+   "unit": null, "archived_at": null, "section_id": 1, "section": "Sales Activity",
+   "dri_user_id": 4, "dri": "Jordan Lee"},
   {"id": 2, "name": "Follow-ups sent to pipeline", "metric_type": "numeric",
-   "unit": null, "archived_at": null, "section": "Sales Activity", "dri": "Jordan Lee"}
+   "unit": null, "archived_at": null, "section_id": 1, "section": "Sales Activity",
+   "dri_user_id": 4, "dri": "Jordan Lee"}
 ]
 ```
 
-`archived_at` is the Monday a metric was archived from, or `null`. `dri` is
-`null` when unowned.
+`archived_at` is the Monday a metric was archived from, or `null`. `dri` and
+`dri_user_id` are `null` when unowned.
 
 **Errors:** `401`
 
@@ -521,6 +544,233 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 
 **Errors:** `401`; `403` `Token lacks admin scope`; `404` `Unknown metric`
 
+### GET /users
+
+Lists everyone with a login, active or not, with the ids `dri_user_id` takes
+and how many live metrics each person owns.
+
+**Scope:** `admin`
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/users
+```
+
+**Response `200`:**
+
+```json
+[
+  {"id": 4, "display_name": "Jordan Lee", "email": "jordan@example.com",
+   "role": "editor", "is_active": true, "slack_member_id": "U012ABCDEF",
+   "metrics_owned": 3}
+]
+```
+
+**Errors:** `401`; `403` `Token lacks admin scope`
+
+### POST /users
+
+Adds a person and returns a temporary password, once. They must change it the
+first time they sign in. Pass it on privately. If the response is lost, reset
+the password on **Admin > Users**.
+
+**Scope:** `admin`
+
+| Body field | Type | Required | Description |
+|------------|------|----------|-------------|
+| `display_name` | string | yes | The name on the board |
+| `email` | string | yes | Their sign-in; must be unique |
+| `role` | `"editor"` or `"viewer"` | no | Defaults to `editor`. Admins are made in the app |
+| `slack_member_id` | string | no | Where nudges and reset links are sent, e.g. `U012ABCDEF` |
+
+```bash
+curl -X POST https://scorecard.example.com/api/v1/users \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"display_name": "Sam Rivera", "email": "sam@example.com"}'
+```
+
+**Response `200`:** the person as in `GET /users`, plus `temp_password`.
+
+```json
+{"id": 7, "display_name": "Sam Rivera", "email": "sam@example.com", "role": "editor",
+ "is_active": true, "slack_member_id": null, "metrics_owned": 0,
+ "temp_password": "EXAMPLE-ONLY"}
+```
+
+Automations log their responses, so an n8n execution log or a CI transcript
+will contain this password until the person changes it. Tell them to sign in
+promptly.
+
+**Errors:** `401`; `403`; `409` `... already exists`; `422` not an email address,
+or `role` is `admin`
+
+### PATCH /users/{user_id}
+
+Changes only the fields you send.
+
+**Scope:** `admin`
+
+| Body field | Type | Description |
+|------------|------|-------------|
+| `display_name` | string | |
+| `email` | string | Must stay unique |
+| `role` | `"editor"` or `"viewer"` | |
+| `is_active` | boolean | `false` signs them out everywhere and stops their nudges. The metrics they own keep them as owner until you reassign them |
+| `slack_member_id` | string or `null` | `null` clears it |
+
+```bash
+curl -X PATCH https://scorecard.example.com/api/v1/users/7 \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"slack_member_id": "U034GHIJKL"}'
+```
+
+**Response `200`:** the person as in `GET /users`.
+
+**Errors:** `401`; `403`; `404` `Unknown user`;
+`409` `Admin accounts are changed in the app, not through the API`, or a
+duplicate email; `422` a required field sent as `null`, or `role` is `admin`
+
+### GET /sections
+
+Lists every section, hidden ones included, with the ids `section_id` takes.
+
+**Scope:** `admin`
+
+**Response `200`:**
+
+```json
+[{"id": 1, "name": "Client Health", "icon": "heart", "is_enabled": true, "metrics": 6}]
+```
+
+`is_enabled` is `false` for a section hidden from the board. `metrics` counts
+live metrics.
+
+**Errors:** `401`; `403`
+
+### POST /sections
+
+Adds a section at the bottom of the board. A second section with the same name
+(ignoring case) is refused, so a setup script can be re-run safely.
+
+**Scope:** `admin`
+
+| Body field | Type | Required | Description |
+|------------|------|----------|-------------|
+| `name` | string | yes | |
+| `icon` | string | no | Icon name, as on Admin > Sections & metrics. Defaults to `chart` |
+
+**Response `200`:** the section as in `GET /sections`.
+
+**Errors:** `401`; `403`; `409` `... already exists`; `422` `name is empty`
+
+### POST /metrics
+
+Adds a metric at the bottom of its section. In a client roster section, this is
+how you add a client. A second live metric with the same name in the same
+section is refused. Set its target afterwards with
+[PUT /metrics/{metric_id}/targets](#put-metricsmetric_idtargets).
+
+**Scope:** `admin`
+
+| Body field | Type | Required | Description |
+|------------|------|----------|-------------|
+| `section_id` | integer | yes | From `GET /sections` |
+| `name` | string | yes | |
+| `metric_type` | `"numeric"`, `"binary"`, `"status"` | yes | See [Metric types](#metric-types). Cannot be changed later |
+| `rollup` | `"sum"` or `"average"` | no | Numeric only: how weeks add up into a month. Defaults to `sum` |
+| `direction` | `"up"` or `"down"` | no | `down` for lower-is-better (costs, open bugs). Defaults to `up` |
+| `unit` | string | no | Display only, e.g. `$` or `%` |
+| `dri_user_id` | integer | no | The owner, from `GET /users`. Must be an active person |
+| `start_week` | string (Monday) | no | Defaults to this week. Cannot be in the future |
+
+```bash
+curl -X POST https://scorecard.example.com/api/v1/metrics \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"section_id": 1, "name": "Delta Wellness", "metric_type": "status", "dri_user_id": 7}'
+```
+
+**Response `200`:**
+
+```json
+{"id": 41, "name": "Delta Wellness", "section_id": 1, "section": "Client Health",
+ "metric_type": "status", "rollup": null, "direction": "up", "unit": null,
+ "dri_user_id": 7, "dri": "Sam Rivera", "start_week": "2026-09-28",
+ "is_key": false, "archived_at": null}
+```
+
+**Errors:** `401`; `403`; `409` `... already exists in this section`;
+`422` unknown section, `No active user ...`, a bad `start_week`
+
+### PATCH /metrics/{metric_id}
+
+Changes only the fields you send. Use it to hand a client to someone else,
+rename a metric, or move it to another section. It also works on archived
+metrics.
+
+**Scope:** `admin`
+
+| Body field | Type | Description |
+|------------|------|-------------|
+| `dri_user_id` | integer or `null` | The new owner; `null` leaves it unowned. Must be an active person |
+| `name` | string | Must stay unique among live metrics in its section |
+| `section_id` | integer | From `GET /sections` |
+| `unit` | string or `null` | `null` clears it |
+| `direction` | `"up"` or `"down"` | |
+| `rollup` | `"sum"` or `"average"` | Numeric metrics only |
+| `is_key` | boolean | |
+| `start_week` | string (Monday) | Cannot be in the future |
+
+`metric_type` cannot be changed, because the numbers already written would stop
+meaning anything. Archive the metric and add a new one instead.
+
+```bash
+curl -X PATCH https://scorecard.example.com/api/v1/metrics/41 \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"dri_user_id": 4}'
+```
+
+**Response `200`:** the metric as in `POST /metrics`.
+
+A new owner takes over from the next nudge: weekly check-ins, stale reminders
+and the red ladder all follow the metric's current owner.
+
+**Errors:** `401`; `403`; `404` `Unknown metric`; `409` `... already exists in this
+section`; `422` unknown section, `No active user ...`, `rollup applies to numeric
+metrics only`, a required field sent as `null`
+
+### PUT /metrics/{metric_id}/targets
+
+Sets one quarter's target for a numeric metric. A target is a pair: the
+baseline scores weeks 1-6 of the quarter and the stretch scores weeks 7-13.
+Both are required, because half a target would score half the quarter
+against nothing. Safe to repeat.
+
+**Scope:** `admin`
+
+| Body field | Type | Required | Description |
+|------------|------|----------|-------------|
+| `year` | integer | yes | |
+| `quarter` | 1-4 | yes | |
+| `baseline` | number | yes | Weekly target for weeks 1-6 |
+| `stretch` | number | yes | Weekly target for weeks 7-13 |
+
+```bash
+curl -X PUT https://scorecard.example.com/api/v1/metrics/2/targets \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"year": 2026, "quarter": 4, "baseline": 8, "stretch": 10}'
+```
+
+**Response `200`:**
+
+```json
+{"ok": true, "metric_id": 2, "year": 2026, "quarter": 4,
+ "baseline": 8, "stretch": 10, "changed": true}
+```
+
+`changed` is `false` when the target was already exactly that.
+
+**Errors:** `401`; `403`; `404` `Unknown or archived metric`;
+`422` `Only numeric metrics have targets`, a missing `baseline` or `stretch`
+
 ## Recipes
 
 ### n8n: accounting export to the Expenses breakdown
@@ -557,6 +807,19 @@ curl -fsS -X POST "https://scorecard.example.com/api/v1/metrics/$METRIC_ID/entri
 
 `-f` makes curl exit non-zero on a `4xx`, so cron and CI notice failures.
 
+### Hand a client to a new owner
+
+```bash
+# 1. Find the person's id, adding them first if they are new
+curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/users
+# 2. Find the client's metric id
+curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/metrics
+# 3. Reassign it
+curl -X PATCH https://scorecard.example.com/api/v1/metrics/41 \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"dri_user_id": 7}'
+```
+
 ### An AI agent
 
 Give the agent a `read` token for [MCP](#mcp-server) to answer questions from the
@@ -579,6 +842,14 @@ connector's token instead of the person reporting the number.
   **Admin > API tokens**.
 
 ## Changelog
+
+**1.2.0** (September 2026)
+
+- Added the admin endpoints for people and structure: `GET`/`POST /users`,
+  `PATCH /users/{user_id}`, `GET`/`POST /sections`, `POST /metrics`,
+  `PATCH /metrics/{metric_id}` and `PUT /metrics/{metric_id}/targets`. Admin
+  accounts stay app-only.
+- `GET /metrics` now also returns `section_id` and `dri_user_id`.
 
 **1.1.0** (September 2026)
 

@@ -570,6 +570,8 @@ table.list tr:last-child td { border-bottom: none; }
 .token-actions form { display: flex; gap: 6px; align-items: center; margin: 0; }
 input[type=number].grace-days { width: 56px; padding: 5px 8px; font-size: 12px; }
 tr.token-prior td { background: var(--pearl); padding-top: 6px; padding-bottom: 6px; }
+.token-clear { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.token-clear form { margin: 0; }
 tr.token-prior td:first-child { padding-left: 24px; }
 
 /* ---- setup & status rows ---- */

@@ -66,6 +66,14 @@ Slack app manifest). Check `git grep` before every commit.
   and exists only to put the scheme in the schema; auth stays in
   api_token_from_request. Bump api_docs.VERSION and the API.md changelog when
   the contract changes.
+- The admin-scope API (users, sections, metric create/PATCH, targets) writes
+  through app/admin_ops.py, the same functions the admin screens call - never
+  a second copy of "one live name per section" or "a target is a pair". It can
+  NOT touch admin accounts: roles are editor/viewer only and an admin's row is
+  read-only (409). That is load-bearing, not caution: a token that can mint an
+  admin reads back its password, and one that can edit an admin's
+  slack_member_id gets that admin's /forgot link DM'd wherever it likes -
+  either way the token becomes a browser admin with Settings and API tokens.
 - app/readiness.py backs Admin > Setup & status. Two tiers, and the split is the
   whole design: local checks read settings/DB only and run on every admin page
   load (they drive the nav badge); network checks call Slack and run ONLY from
@@ -285,6 +293,19 @@ docker compose up -d --build     # prod-style run on 127.0.0.1:8096
   check entry_audit for source='api' and find the writer. The upsert shape is
   deliberate: it makes a re-run idempotent and lets a missed run self-heal, but
   it means "last writer wins" and the automation usually writes last.
+
+- The goal band (grid.py MrrHud) shows the SINGLE NEWEST week that has a value
+  for the goal metric, in-progress week included - a point-in-time number is
+  whole the day it is read. The edit grid and check-in page default to the LAST
+  CLOSED week. So when an API writer (or anyone) puts a value in the current
+  week and a person then "corrects" it by typing in the grid, the correction
+  lands one column to the left and the band never moves: the TV keeps showing
+  the number they just replaced, with no error and nothing stale-flagged.
+  Symptom: "the TV didn't update" while entry_audit shows the manual write
+  landing fine. Check which week_start each write hit before suspecting the
+  poll or the kiosk. Fix is a value in the newest week, not a redeploy. If this
+  keeps biting, the band should prefer the newest week a HUMAN touched, or
+  the grid should default point-in-time metrics to the current week.
 
 - The left rail is fixed at 196px and .page reserves 220px for it, so until
   the max-width:760px block existed a 414px phone got ~170px of content and the

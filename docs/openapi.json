@@ -467,6 +467,100 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "MetricIn": {
+        "properties": {
+          "direction": {
+            "default": "up",
+            "description": "down for lower-is-better (costs, bugs)",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "dri_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Owner, from GET /api/v1/users",
+            "title": "Dri User Id"
+          },
+          "metric_type": {
+            "enum": [
+              "numeric",
+              "binary",
+              "status"
+            ],
+            "title": "Metric Type",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Acme Co"
+            ],
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "rollup": {
+            "default": "sum",
+            "description": "numeric only; ignored otherwise",
+            "enum": [
+              "sum",
+              "average"
+            ],
+            "title": "Rollup",
+            "type": "string"
+          },
+          "section_id": {
+            "description": "From GET /api/v1/sections",
+            "title": "Section Id",
+            "type": "integer"
+          },
+          "start_week": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monday tracking starts. Defaults to this week.",
+            "examples": [
+              "2026-09-28"
+            ],
+            "title": "Start Week"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "$"
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "section_id",
+          "name",
+          "metric_type"
+        ],
+        "title": "MetricIn",
+        "type": "object"
+      },
       "MetricListItem": {
         "properties": {
           "archived_at": {
@@ -491,6 +585,18 @@
             ],
             "title": "Dri"
           },
+          "dri_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Owner's user id (GET /users)",
+            "title": "Dri User Id"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -512,6 +618,10 @@
             "title": "Section",
             "type": "string"
           },
+          "section_id": {
+            "title": "Section Id",
+            "type": "integer"
+          },
           "unit": {
             "anyOf": [
               {
@@ -528,9 +638,234 @@
           "id",
           "name",
           "metric_type",
+          "section_id",
           "section"
         ],
         "title": "MetricListItem",
+        "type": "object"
+      },
+      "MetricOut": {
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "direction": {
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "dri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dri"
+          },
+          "dri_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dri User Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_key": {
+            "title": "Is Key",
+            "type": "boolean"
+          },
+          "metric_type": {
+            "enum": [
+              "numeric",
+              "binary",
+              "status"
+            ],
+            "title": "Metric Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rollup": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sum",
+                  "average"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "numeric only: how weeks add up into a month or quarter",
+            "title": "Rollup"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "integer"
+          },
+          "start_week": {
+            "title": "Start Week",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "section_id",
+          "section",
+          "metric_type",
+          "direction",
+          "start_week",
+          "is_key"
+        ],
+        "title": "MetricOut",
+        "type": "object"
+      },
+      "MetricPatchIn": {
+        "properties": {
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "up",
+                  "down"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "dri_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null leaves the metric unowned",
+            "title": "Dri User Id"
+          },
+          "is_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Key"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "rollup": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sum",
+                  "average"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "numeric metrics only",
+            "title": "Rollup"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "start_week": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monday tracking starts",
+            "title": "Start Week"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears it",
+            "title": "Unit"
+          }
+        },
+        "title": "MetricPatchIn",
         "type": "object"
       },
       "MetricStateOut": {
@@ -781,6 +1116,70 @@
         "title": "ScorecardOut",
         "type": "object"
       },
+      "SectionIn": {
+        "properties": {
+          "icon": {
+            "default": "chart",
+            "description": "Icon name, as on Admin > Sections & metrics",
+            "title": "Icon",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Client Health"
+            ],
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SectionIn",
+        "type": "object"
+      },
+      "SectionItem": {
+        "properties": {
+          "icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_enabled": {
+            "description": "false when the section is hidden from the board",
+            "title": "Is Enabled",
+            "type": "boolean"
+          },
+          "metrics": {
+            "description": "Live metrics in the section",
+            "title": "Metrics",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "is_enabled",
+          "metrics"
+        ],
+        "title": "SectionItem",
+        "type": "object"
+      },
       "SectionOut": {
         "properties": {
           "metrics": {
@@ -800,6 +1199,114 @@
           "metrics"
         ],
         "title": "SectionOut",
+        "type": "object"
+      },
+      "TargetIn": {
+        "properties": {
+          "baseline": {
+            "description": "Scores weeks 1-6 of the quarter",
+            "examples": [
+              8
+            ],
+            "title": "Baseline",
+            "type": "number"
+          },
+          "quarter": {
+            "examples": [
+              4
+            ],
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Quarter",
+            "type": "integer"
+          },
+          "stretch": {
+            "description": "Scores weeks 7-13",
+            "examples": [
+              10
+            ],
+            "title": "Stretch",
+            "type": "number"
+          },
+          "year": {
+            "examples": [
+              2026
+            ],
+            "maximum": 2100.0,
+            "minimum": 2000.0,
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "quarter",
+          "baseline",
+          "stretch"
+        ],
+        "title": "TargetIn",
+        "type": "object"
+      },
+      "TargetOut": {
+        "properties": {
+          "baseline": {
+            "description": "Scores weeks 1-6 of the quarter",
+            "examples": [
+              8
+            ],
+            "title": "Baseline",
+            "type": "number"
+          },
+          "changed": {
+            "description": "false when the target was already exactly this",
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "integer"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "quarter": {
+            "examples": [
+              4
+            ],
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Quarter",
+            "type": "integer"
+          },
+          "stretch": {
+            "description": "Scores weeks 7-13",
+            "examples": [
+              10
+            ],
+            "title": "Stretch",
+            "type": "number"
+          },
+          "year": {
+            "examples": [
+              2026
+            ],
+            "maximum": 2100.0,
+            "minimum": 2000.0,
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "quarter",
+          "baseline",
+          "stretch",
+          "metric_id",
+          "changed"
+        ],
+        "title": "TargetOut",
         "type": "object"
       },
       "UnarchiveOut": {
@@ -834,6 +1341,242 @@
           "was_archived"
         ],
         "title": "UnarchiveOut",
+        "type": "object"
+      },
+      "UserCreatedOut": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "metrics_owned": {
+            "description": "Live metrics this person is the owner (DRI) of",
+            "title": "Metrics Owned",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "editor",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Member Id"
+          },
+          "temp_password": {
+            "description": "Shown once. The person must change it at first sign-in.",
+            "title": "Temp Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "email",
+          "role",
+          "is_active",
+          "metrics_owned",
+          "temp_password"
+        ],
+        "title": "UserCreatedOut",
+        "type": "object"
+      },
+      "UserIn": {
+        "properties": {
+          "display_name": {
+            "examples": [
+              "Jordan Lee"
+            ],
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "examples": [
+              "jordan@example.com"
+            ],
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "editor",
+            "description": "editor enters numbers; viewer only looks. Admins are made in the app.",
+            "enum": [
+              "editor",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where nudges and reset links go, e.g. U012ABCDEF",
+            "examples": [
+              "U012ABCDEF"
+            ],
+            "title": "Slack Member Id"
+          }
+        },
+        "required": [
+          "display_name",
+          "email"
+        ],
+        "title": "UserIn",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "metrics_owned": {
+            "description": "Live metrics this person is the owner (DRI) of",
+            "title": "Metrics Owned",
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "editor",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Member Id"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "email",
+          "role",
+          "is_active",
+          "metrics_owned"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "UserPatchIn": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "false signs the person out everywhere",
+            "title": "Is Active"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "editor",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "slack_member_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null clears it",
+            "title": "Slack Member Id"
+          }
+        },
+        "title": "UserPatchIn",
         "type": "object"
       },
       "ValidationError": {
@@ -909,9 +1652,9 @@
     }
   },
   "info": {
-    "description": "Read the company scorecard and write weekly numbers into it.\n\n**Authentication.** Send an API token as `Authorization: Bearer sc_...`.\nTokens are created on Admin > API tokens and shown once. Scopes: `read`\n(GET only), `write` and `read_write` (GET and writes), `admin` (everything,\nincluding archiving).\n\n**Weeks.** A week is identified by its Monday, `YYYY-MM-DD`, in the business\ntimezone. Writes default to the last closed week, the one that is due. Future\nweeks and weeks before a metric started are refused.\n\n**Writes replace.** Writing a week sets its value, replacing any previous\nvalue, including one typed by hand. Re-sending is safe. Every write is\nrecorded in the audit trail against the token.\n\nFull reference with examples: `docs/API.md` in the repository.\n",
+    "description": "Read the company scorecard, write weekly numbers into it, and manage who owns\nwhat.\n\n**Authentication.** Send an API token as `Authorization: Bearer sc_...`.\nTokens are created on Admin > API tokens and shown once. Scopes: `read`\n(GET only), `write` and `read_write` (GET and writes), `admin` (everything,\nincluding people, sections, metric definitions, targets and archiving).\nAdmin accounts themselves are managed in the app, never through the API.\n\n**Weeks.** A week is identified by its Monday, `YYYY-MM-DD`, in the business\ntimezone. Writes default to the last closed week, the one that is due. Future\nweeks and weeks before a metric started are refused.\n\n**Writes replace.** Writing a week sets its value, replacing any previous\nvalue, including one typed by hand. Re-sending is safe. Every write is\nrecorded in the audit trail against the token.\n\nFull reference with examples: `docs/API.md` in the repository.\n",
     "title": "Scorecard API",
-    "version": "1.1.0"
+    "version": "1.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1118,6 +1861,181 @@
         "tags": [
           "Metrics"
         ]
+      },
+      "post": {
+        "description": "Adds a metric (or a client, in a roster section) at the bottom of its section. A second live metric with the same name in the section is refused. Set its target with PUT /metrics/{metric_id}/targets. Needs an admin token.",
+        "operationId": "create_metric_api_v1_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add a metric",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/metrics/{metric_id}": {
+      "patch": {
+        "description": "Changes only the fields sent: rename, move section, reassign or clear the owner, and so on. The type cannot change, since the numbers already written would stop meaning anything; archive it and add a new one. Works on archived metrics too. Needs an admin token.",
+        "operationId": "update_metric_api_v1_metrics__metric_id__patch",
+        "parameters": [
+          {
+            "description": "Metric id from GET /api/v1/metrics",
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "description": "Metric id from GET /api/v1/metrics",
+              "title": "Metric Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change a metric",
+        "tags": [
+          "Admin"
+        ]
       }
     },
     "/api/v1/metrics/{metric_id}/archive": {
@@ -1307,6 +2225,96 @@
         ]
       }
     },
+    "/api/v1/metrics/{metric_id}/targets": {
+      "put": {
+        "description": "Sets a numeric metric's baseline (weeks 1-6) and stretch (weeks 7-13) for one quarter. Both are required: half a target would score half the quarter against nothing. Idempotent. Needs an admin token.",
+        "operationId": "put_target_api_v1_metrics__metric_id__targets_put",
+        "parameters": [
+          {
+            "description": "Metric id from GET /api/v1/metrics",
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "description": "Metric id from GET /api/v1/metrics",
+              "title": "Metric Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TargetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set a quarter's target",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
     "/api/v1/metrics/{metric_id}/unarchive": {
       "post": {
         "description": "Puts an archived metric back. Needs an admin token.",
@@ -1423,6 +2431,358 @@
           "Scorecard"
         ]
       }
+    },
+    "/api/v1/sections": {
+      "get": {
+        "description": "Every section, hidden ones included, with the ids that `section_id` takes. Needs an admin token.",
+        "operationId": "list_sections_api_v1_sections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SectionItem"
+                  },
+                  "title": "Response 200 List Sections Api V1 Sections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List sections",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "post": {
+        "description": "Adds a section at the bottom of the board. A second section with the same name is refused, so re-running a setup script is safe. Needs an admin token.",
+        "operationId": "create_section_api_v1_sections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SectionItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add a section",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "description": "Everyone with a login, active or not, with the ids that `dri_user_id` takes and how many live metrics each owns. Needs an admin token.",
+        "operationId": "list_users_api_v1_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response 200 List Users Api V1 Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List people",
+        "tags": [
+          "Admin"
+        ]
+      },
+      "post": {
+        "description": "Creates an editor or viewer login and returns a temporary password, once; they must change it at first sign-in. Admins are made in the app. Needs an admin token.",
+        "operationId": "create_user_api_v1_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCreatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add a person",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/v1/users/{user_id}": {
+      "patch": {
+        "description": "Changes only the fields sent. is_active false signs them out everywhere and stops their nudges; the metrics they own keep them as owner until reassigned. Admin accounts cannot be changed here. Needs an admin token.",
+        "operationId": "update_user_api_v1_users__user_id__patch",
+        "parameters": [
+          {
+            "description": "From GET /api/v1/users",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "From GET /api/v1/users",
+              "title": "User Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Missing or invalid token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Token scope too low"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict with current configuration"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid input (see detail)"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change a person",
+        "tags": [
+          "Admin"
+        ]
+      }
     }
   },
   "tags": [
@@ -1439,7 +2799,7 @@
       "name": "CEO metrics"
     },
     {
-      "description": "Structural changes. Admin tokens only.",
+      "description": "People, sections, metric definitions, targets and archiving. Admin tokens only.",
       "name": "Admin"
     }
   ]

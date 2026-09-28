@@ -8,6 +8,11 @@ POST /api/v1/metrics/{id}/entries  {"week_start": "YYYY-MM-DD" (a Monday, option
 POST /api/v1/metrics/{id}/archive    {"effective_week": "YYYY-MM-DD" (a Monday,
                                       optional, defaults to this week)}  admin scope
 POST /api/v1/metrics/{id}/unarchive  admin scope
+GET/POST /api/v1/users, PATCH /api/v1/users/{id}    admin scope; editors and
+                                 viewers only - admin accounts stay in the app
+GET/POST /api/v1/sections                          admin scope
+POST /api/v1/metrics, PATCH /api/v1/metrics/{id}   admin scope (owner, name...)
+PUT  /api/v1/metrics/{id}/targets                  admin scope, baseline+stretch
 GET  /api/v1/ceo                 the seven CEO slots, the metric filling each,
                                  and each breakdown's categories (ids + names)
 POST /api/v1/ceo/{slot}/breakdown  {"week_start": optional Monday,
@@ -118,7 +123,9 @@ class MetricListItem(BaseModel):
     metric_type: Literal["numeric", "binary", "status"]
     unit: Optional[str] = None
     archived_at: Optional[str] = None
+    section_id: int
     section: str
+    dri_user_id: Optional[int] = Field(None, description="Owner's user id (GET /users)")
     dri: Optional[str] = None
 
 
@@ -282,7 +289,8 @@ def metrics_rows(con: sqlite3.Connection, include_archived: bool = False) -> lis
     arch = "" if include_archived else "WHERE m.archived_at IS NULL"
     rows = con.execute(
         f"""SELECT m.id, m.name, m.metric_type, m.unit, m.archived_at,
-                   s.name AS section, u.display_name AS dri
+                   m.section_id, s.name AS section, m.dri_user_id,
+                   u.display_name AS dri
             FROM metrics m JOIN sections s ON s.id = m.section_id
             LEFT JOIN users u ON u.id = m.dri_user_id
             {arch} ORDER BY s.sort_order, m.sort_order"""
@@ -553,3 +561,364 @@ def unarchive_metric(request: Request, metric_id: int = Path(description="Metric
     con.execute("UPDATE metrics SET archived_at = NULL WHERE id = ?", (metric_id,))
     return {"ok": True, "metric_id": metric_id, "name": m["name"],
             "archived": False, "was_archived": was_archived}
+
+
+# ------------------------------------------------ people and structure (admin)
+# The quarterly jobs from Admin > Users, Sections & metrics and Targets, for an
+# automation or an agent holding an admin token. Every write goes through
+# admin_ops, the same functions those screens call, so the API cannot become a
+# looser way to do what the screens refuse.
+#
+# ADMIN ACCOUNTS ARE OUT OF REACH HERE, and that is the one rule to keep. A
+# token that could mint an admin, or edit one, is a token that can turn itself
+# into a browser login with Settings and API tokens behind it: create an admin
+# and read back its password, or point a real admin's slack_member_id at
+# another Slack user and send /forgot. So roles are editor/viewer only, and an
+# admin's row is read-only - promoting, demoting and re-addressing admins stays
+# in the app, where a person does it signed in as themselves.
+
+ADMIN_ONLY_IN_APP = "Admin accounts are changed in the app, not through the API"
+
+
+class UserOut(BaseModel):
+    id: int
+    display_name: str
+    email: str
+    role: Literal["admin", "editor", "viewer"]
+    is_active: bool
+    slack_member_id: Optional[str] = None
+    metrics_owned: int = Field(description="Live metrics this person is the owner (DRI) of")
+
+
+class UserCreatedOut(UserOut):
+    temp_password: str = Field(description="Shown once. The person must change it at first sign-in.")
+
+
+class UserIn(BaseModel):
+    display_name: str = Field(min_length=1, examples=["Jordan Lee"])
+    email: str = Field(min_length=3, examples=["jordan@example.com"])
+    role: Literal["editor", "viewer"] = Field(
+        "editor", description="editor enters numbers; viewer only looks. Admins are made in the app.")
+    slack_member_id: Optional[str] = Field(
+        None, description="Where nudges and reset links go, e.g. U012ABCDEF", examples=["U012ABCDEF"])
+
+
+class UserPatchIn(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1)
+    email: Optional[str] = Field(None, min_length=3)
+    role: Optional[Literal["editor", "viewer"]] = None
+    is_active: Optional[bool] = Field(None, description="false signs the person out everywhere")
+    slack_member_id: Optional[str] = Field(None, description="null clears it")
+
+
+class SectionItem(BaseModel):
+    id: int
+    name: str
+    icon: Optional[str] = None
+    is_enabled: bool = Field(description="false when the section is hidden from the board")
+    metrics: int = Field(description="Live metrics in the section")
+
+
+class SectionIn(BaseModel):
+    name: str = Field(min_length=1, examples=["Client Health"])
+    icon: str = Field("chart", description="Icon name, as on Admin > Sections & metrics")
+
+
+class MetricOut(BaseModel):
+    id: int
+    name: str
+    section_id: int
+    section: str
+    metric_type: Literal["numeric", "binary", "status"]
+    rollup: Optional[Literal["sum", "average"]] = Field(
+        None, description="numeric only: how weeks add up into a month or quarter")
+    direction: Literal["up", "down"]
+    unit: Optional[str] = None
+    dri_user_id: Optional[int] = None
+    dri: Optional[str] = None
+    start_week: str
+    is_key: bool
+    archived_at: Optional[str] = None
+
+
+class MetricIn(BaseModel):
+    section_id: int = Field(description="From GET /api/v1/sections")
+    name: str = Field(min_length=1, examples=["Acme Co"])
+    metric_type: Literal["numeric", "binary", "status"]
+    rollup: Literal["sum", "average"] = Field("sum", description="numeric only; ignored otherwise")
+    direction: Literal["up", "down"] = Field("up", description="down for lower-is-better (costs, bugs)")
+    unit: Optional[str] = Field(None, examples=["$"])
+    dri_user_id: Optional[int] = Field(None, description="Owner, from GET /api/v1/users")
+    start_week: Optional[str] = Field(
+        None, description="Monday tracking starts. Defaults to this week.", examples=["2026-09-28"])
+
+
+class MetricPatchIn(BaseModel):
+    name: Optional[str] = Field(None, min_length=1)
+    section_id: Optional[int] = None
+    dri_user_id: Optional[int] = Field(None, description="null leaves the metric unowned")
+    unit: Optional[str] = Field(None, description="null clears it")
+    direction: Optional[Literal["up", "down"]] = None
+    rollup: Optional[Literal["sum", "average"]] = Field(None, description="numeric metrics only")
+    is_key: Optional[bool] = None
+    start_week: Optional[str] = Field(None, description="Monday tracking starts")
+
+
+class TargetIn(BaseModel):
+    year: int = Field(ge=2000, le=2100, examples=[2026])
+    quarter: int = Field(ge=1, le=4, examples=[4])
+    baseline: float = Field(description="Scores weeks 1-6 of the quarter", examples=[8])
+    stretch: float = Field(description="Scores weeks 7-13", examples=[10])
+
+
+class TargetOut(TargetIn):
+    ok: bool = True
+    metric_id: int
+    changed: bool = Field(description="false when the target was already exactly this")
+
+
+def _admin(request: Request, con: sqlite3.Connection) -> sqlite3.Row:
+    return api_token_from_request(request, con, need_admin=True)
+
+
+def _user_out(con: sqlite3.Connection, uid: int) -> dict:
+    r = con.execute(
+        """SELECT u.id, u.display_name, u.email, u.role, u.is_active, u.slack_member_id,
+                  (SELECT COUNT(*) FROM metrics m
+                    WHERE m.dri_user_id = u.id AND m.archived_at IS NULL) AS metrics_owned
+           FROM users u WHERE u.id = ?""", (uid,)).fetchone()
+    return {**dict(r), "is_active": bool(r["is_active"])}
+
+
+def _email_or_422(email: str) -> str:
+    email = email.strip()
+    if "@" not in email or any(c.isspace() for c in email):
+        raise HTTPException(422, f"Not an email address: {email!r}")
+    return email
+
+
+@router.get("/users", tags=["Admin"], summary="List people",
+            responses={200: {"model": list[UserOut]}, **_errors(401, 403)},
+            description="Everyone with a login, active or not, with the ids that "
+                        "`dri_user_id` takes and how many live metrics each owns. "
+                        "Needs an admin token.")
+def list_users(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    _admin(request, con)
+    ids = [r["id"] for r in con.execute("SELECT id FROM users ORDER BY display_name")]
+    return [_user_out(con, i) for i in ids]
+
+
+@router.post("/users", tags=["Admin"], summary="Add a person",
+             responses={200: {"model": UserCreatedOut}, **_errors(401, 403, 409, 422)},
+             description="Creates an editor or viewer login and returns a temporary "
+                         "password, once; they must change it at first sign-in. Admins "
+                         "are made in the app. Needs an admin token.")
+def create_user(body: UserIn, request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    try:
+        uid, pw = admin_ops.create_user(con, body.display_name, _email_or_422(body.email),
+                                        body.role, (body.slack_member_id or "").strip() or None)
+    except admin_ops.Conflict as e:
+        raise HTTPException(409, str(e))
+    return {**_user_out(con, uid), "temp_password": pw}
+
+
+@router.patch("/users/{user_id}", tags=["Admin"], summary="Change a person",
+              responses={200: {"model": UserOut}, **_errors(401, 403, 404, 409, 422)},
+              description="Changes only the fields sent. is_active false signs them "
+                          "out everywhere and stops their nudges; the metrics they own "
+                          "keep them as owner until reassigned. Admin accounts cannot "
+                          "be changed here. Needs an admin token.")
+def update_user(body: UserPatchIn, request: Request,
+                user_id: int = Path(description="From GET /api/v1/users"),
+                con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    u = con.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if u is None:
+        raise HTTPException(404, "Unknown user")
+    if u["role"] == "admin":
+        raise HTTPException(409, ADMIN_ONLY_IN_APP)
+    sent = body.model_fields_set
+    for field in ("display_name", "email", "role", "is_active"):
+        if field in sent and getattr(body, field) is None:
+            raise HTTPException(422, f"{field} cannot be null")
+    if "email" in sent:
+        email = _email_or_422(body.email)
+        if con.execute("SELECT 1 FROM users WHERE email = ? AND id != ?",
+                       (email, user_id)).fetchone():
+            raise HTTPException(409, f"{email} already exists")
+        con.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
+    if "display_name" in sent:
+        con.execute("UPDATE users SET display_name = ? WHERE id = ?",
+                    (body.display_name.strip(), user_id))
+    if "role" in sent:
+        con.execute("UPDATE users SET role = ? WHERE id = ?", (body.role, user_id))
+    if "slack_member_id" in sent:
+        con.execute("UPDATE users SET slack_member_id = ? WHERE id = ?",
+                    ((body.slack_member_id or "").strip() or None, user_id))
+    if "is_active" in sent:
+        admin_ops.set_user_active(con, user_id, body.is_active)
+    return _user_out(con, user_id)
+
+
+def _sections(con: sqlite3.Connection) -> list[dict]:
+    return [{**dict(r), "is_enabled": bool(r["is_enabled"])} for r in con.execute(
+        """SELECT s.id, s.name, s.icon, s.is_enabled,
+                  (SELECT COUNT(*) FROM metrics m
+                    WHERE m.section_id = s.id AND m.archived_at IS NULL) AS metrics
+           FROM sections s ORDER BY s.sort_order, s.id""")]
+
+
+@router.get("/sections", tags=["Admin"], summary="List sections",
+            responses={200: {"model": list[SectionItem]}, **_errors(401, 403)},
+            description="Every section, hidden ones included, with the ids that "
+                        "`section_id` takes. Needs an admin token.")
+def list_sections(request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    _admin(request, con)
+    return _sections(con)
+
+
+@router.post("/sections", tags=["Admin"], summary="Add a section",
+             responses={200: {"model": SectionItem}, **_errors(401, 403, 409, 422)},
+             description="Adds a section at the bottom of the board. A second section "
+                         "with the same name is refused, so re-running a setup script "
+                         "is safe. Needs an admin token.")
+def create_section(body: SectionIn, request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    name = admin_ops.clean_name(body.name)
+    if not name:
+        raise HTTPException(422, "name is empty")
+    if con.execute("SELECT 1 FROM sections WHERE lower(name) = lower(?)", (name,)).fetchone():
+        raise HTTPException(409, f"{name} already exists")
+    mx = con.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM sections").fetchone()["n"]
+    sid = con.execute("INSERT INTO sections (name, icon, sort_order) VALUES (?,?,?)",
+                      (name, body.icon or "chart", mx)).lastrowid
+    return next(s for s in _sections(con) if s["id"] == sid)
+
+
+def _metric_out(con: sqlite3.Connection, metric_id: int) -> dict:
+    r = con.execute(
+        """SELECT m.id, m.name, m.section_id, s.name AS section, m.metric_type, m.rollup,
+                  m.direction, m.unit, m.dri_user_id, u.display_name AS dri,
+                  m.start_week, m.is_key, m.archived_at
+           FROM metrics m JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id WHERE m.id = ?""", (metric_id,)).fetchone()
+    return {**dict(r), "is_key": bool(r["is_key"])}
+
+
+def _section_or_422(con: sqlite3.Connection, section_id: int) -> None:
+    if not con.execute("SELECT 1 FROM sections WHERE id = ?", (section_id,)).fetchone():
+        raise HTTPException(422, f"Unknown section {section_id}")
+
+
+def _owner_or_422(con: sqlite3.Connection, user_id: Optional[int]) -> None:
+    # An inactive owner is a metric nobody is nudged about: it would go stale
+    # every week with no one to tell.
+    if user_id is not None and not con.execute(
+            "SELECT 1 FROM users WHERE id = ? AND is_active = 1", (user_id,)).fetchone():
+        raise HTTPException(422, f"No active user {user_id}")
+
+
+def _start_or_422(start_week: str, now: datetime):
+    try:
+        week = wk.parse_week(start_week)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if week > wk.current_week(now):
+        raise HTTPException(422, "start_week cannot be in the future")
+    return week
+
+
+@router.post("/metrics", tags=["Admin"], summary="Add a metric",
+             responses={200: {"model": MetricOut}, **_errors(401, 403, 409, 422)},
+             description="Adds a metric (or a client, in a roster section) at the "
+                         "bottom of its section. A second live metric with the same "
+                         "name in the section is refused. Set its target with PUT "
+                         "/metrics/{metric_id}/targets. Needs an admin token.")
+def create_metric(body: MetricIn, request: Request, con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    _section_or_422(con, body.section_id)
+    _owner_or_422(con, body.dri_user_id)
+    if not admin_ops.clean_name(body.name):
+        raise HTTPException(422, "name is empty")
+    now = datetime.now(timezone.utc)
+    start = _start_or_422(body.start_week, now) if body.start_week else wk.current_week(now)
+    try:
+        mid = admin_ops.create_metric(con, body.section_id, body.name, body.metric_type,
+                                      body.rollup, body.direction,
+                                      (body.unit or "").strip() or None,
+                                      body.dri_user_id, start)
+    except admin_ops.Conflict as e:
+        raise HTTPException(409, str(e))
+    return _metric_out(con, mid)
+
+
+@router.patch("/metrics/{metric_id}", tags=["Admin"], summary="Change a metric",
+              responses={200: {"model": MetricOut}, **_errors(401, 403, 404, 409, 422)},
+              description="Changes only the fields sent: rename, move section, "
+                          "reassign or clear the owner, and so on. The type cannot "
+                          "change, since the numbers already written would stop "
+                          "meaning anything; archive it and add a new one. Works on "
+                          "archived metrics too. Needs an admin token.")
+def update_metric(body: MetricPatchIn, request: Request,
+                  metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
+                  con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    m = _metric_row(con, metric_id)
+    sent = body.model_fields_set
+    for field in ("name", "section_id", "direction", "rollup", "is_key", "start_week"):
+        if field in sent and getattr(body, field) is None:
+            raise HTTPException(422, f"{field} cannot be null")
+    section_id = body.section_id if "section_id" in sent else m["section_id"]
+    name = admin_ops.clean_name(body.name) if "name" in sent else m["name"]
+    if not name:
+        raise HTTPException(422, "name is empty")
+    if "section_id" in sent:
+        _section_or_422(con, section_id)
+    if "dri_user_id" in sent:
+        _owner_or_422(con, body.dri_user_id)
+    if "rollup" in sent and m["metric_type"] != "numeric":
+        raise HTTPException(422, "rollup applies to numeric metrics only")
+    start = (_start_or_422(body.start_week, datetime.now(timezone.utc)).isoformat()
+             if "start_week" in sent else m["start_week"])
+    if m["archived_at"] is None and admin_ops.name_taken(con, section_id, name, metric_id):
+        raise HTTPException(409, f"{name} already exists in this section")
+    con.execute(
+        """UPDATE metrics SET name=?, section_id=?, dri_user_id=?, unit=?, direction=?,
+                              rollup=?, is_key=?, start_week=? WHERE id=?""",
+        (name, section_id,
+         body.dri_user_id if "dri_user_id" in sent else m["dri_user_id"],
+         ((body.unit or "").strip() or None) if "unit" in sent else m["unit"],
+         body.direction if "direction" in sent else m["direction"],
+         body.rollup if "rollup" in sent else m["rollup"],
+         int(body.is_key) if "is_key" in sent else m["is_key"],
+         start, metric_id))
+    return _metric_out(con, metric_id)
+
+
+@router.put("/metrics/{metric_id}/targets", tags=["Admin"], summary="Set a quarter's target",
+            responses={200: {"model": TargetOut}, **_errors(401, 403, 404, 422)},
+            description="Sets a numeric metric's baseline (weeks 1-6) and stretch "
+                        "(weeks 7-13) for one quarter. Both are required: half a "
+                        "target would score half the quarter against nothing. "
+                        "Idempotent. Needs an admin token.")
+def put_target(body: TargetIn, request: Request,
+               metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
+               con: sqlite3.Connection = Depends(db_dep)):
+    from . import admin_ops
+    _admin(request, con)
+    m = con.execute("SELECT * FROM metrics WHERE id = ? AND archived_at IS NULL",
+                    (metric_id,)).fetchone()
+    if m is None:
+        raise HTTPException(404, "Unknown or archived metric")
+    if m["metric_type"] != "numeric":
+        raise HTTPException(422, "Only numeric metrics have targets")
+    changed = admin_ops.save_target(con, metric_id, body.year, body.quarter,
+                                    body.baseline, body.stretch)
+    return {"ok": True, "metric_id": metric_id, "year": body.year, "quarter": body.quarter,
+            "baseline": body.baseline, "stretch": body.stretch, "changed": changed}

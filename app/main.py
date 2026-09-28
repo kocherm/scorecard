@@ -25,8 +25,9 @@ from fastapi.templating import Jinja2Templates
 
 from migrate import add_admin_scope, channel_rollup, oto_revisions, slack_two_way
 from migrate import passkeys as passkeys_migration
+from migrate import token_cleared
 
-from . import (alerts, ceo as ceom, channels, db as dbm, demo, entry_ops,
+from . import (admin_ops, alerts, ceo as ceom, channels, db as dbm, demo, entry_ops,
                grid as gridm, passkeys, readiness, weeks as wk)
 from .api import router as api_router
 from .api_docs import router as api_docs_router
@@ -108,6 +109,8 @@ async def lifespan(app: FastAPI):
         # password-reset links and passkeys. init_db above already made the two
         # new tables (they are IF NOT EXISTS); columns need this.
         for line in passkeys_migration.migrate(con):
+            log.info("Migration: %s", line)
+        for line in token_cleared.migrate(con):
             log.info("Migration: %s", line)
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
@@ -1400,7 +1403,7 @@ def add_metric(section_id: int = Form(...), name: str = Form(...),
                unit: str = Form(""), direction: str = Form("up"),
                dri_user_id: str = Form(""), again: str = Form(""),
                user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    name = " ".join(name.split())
+    name = admin_ops.clean_name(name)
     # The roster form keeps its focus so a batch of clients is name, Enter,
     # name, Enter - and lands back on the section it came from either way.
     def back(flash: str = "") -> RedirectResponse:
@@ -1409,21 +1412,13 @@ def add_metric(section_id: int = Form(...), name: str = Form(...),
                                 status_code=303)
     if not name:
         return back()
-    if con.execute("SELECT 1 FROM metrics WHERE section_id = ? AND archived_at IS NULL "
-                   "AND lower(name) = lower(?)", (section_id, name)).fetchone():
-        # Two live rows with one name are two tiles on the TV for one client.
+    try:
+        admin_ops.create_metric(
+            con, section_id, name, metric_type, rollup, direction, unit or None,
+            int(dri_user_id) if dri_user_id else None,
+            wk.current_week(datetime.now(timezone.utc)))
+    except admin_ops.Conflict:
         return back(f"dup={quote_plus(name)}")
-    start = wk.current_week(datetime.now(timezone.utc))
-    mx = con.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM metrics WHERE section_id = ?",
-                     (section_id,)).fetchone()["n"]
-    con.execute(
-        """INSERT INTO metrics (section_id, name, metric_type, rollup, direction, unit,
-                                dri_user_id, start_week, sort_order)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (section_id, name, metric_type,
-         rollup if metric_type == "numeric" else None,
-         direction, unit or None,
-         int(dri_user_id) if dri_user_id else None, start.isoformat(), mx))
     return back(f"added={quote_plus(name)}")
 
 
@@ -1520,19 +1515,7 @@ def save_targets(request: Request, year: int = Form(...), quarter: int = Form(..
             bv, sv = float(b), float(st)
         except ValueError:
             raise HTTPException(422, f"Targets must be numbers: {b!r}, {st!r}")
-        cur = con.execute(
-            "SELECT baseline_value, stretch_value FROM targets "
-            "WHERE metric_id=? AND year=? AND quarter=?", (mid, year, quarter)).fetchone()
-        if cur and (cur["baseline_value"], cur["stretch_value"]) == (bv, sv):
-            continue
-        con.execute(
-            """INSERT INTO targets (metric_id, year, quarter, baseline_value, stretch_value)
-               VALUES (?,?,?,?,?)
-               ON CONFLICT(metric_id, year, quarter) DO UPDATE SET
-                 baseline_value = excluded.baseline_value,
-                 stretch_value = excluded.stretch_value""",
-            (mid, year, quarter, bv, sv))
-        saved += 1
+        saved += admin_ops.save_target(con, mid, year, quarter, bv, sv)
     con.commit()
     return RedirectResponse(
         f"/admin/targets?year={year}&quarter={quarter}&saved={saved}", status_code=303)
@@ -1584,21 +1567,13 @@ def admin_users(request: Request, sort: str = "", user=Depends(require_admin),
     return _users_page(request, con, user, sort=sort)
 
 
-def _temp_password() -> str:
-    return secrets.token_urlsafe(9)
-
-
 @app.post("/admin/users", response_class=HTMLResponse)
 def add_user(request: Request, display_name: str = Form(...), email: str = Form(...),
              role: str = Form("editor"),
              user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    pw = _temp_password()
     try:
-        con.execute(
-            """INSERT INTO users (email, password_hash, display_name, role, must_change_password)
-               VALUES (?,?,?,?,1)""",
-            (email.strip(), hash_password(pw), display_name.strip(), role))
-    except sqlite3.IntegrityError:
+        _, pw = admin_ops.create_user(con, display_name, email, role)
+    except admin_ops.Conflict:
         return _users_page(request, con, user,
                            flash=f"{email} already exists.", flash_kind="err")
     return _users_page(request, con, user,
@@ -1637,8 +1612,10 @@ def toggle_user(uid: int, user=Depends(require_admin),
                 con: sqlite3.Connection = Depends(db_dep)):
     if uid == user["id"]:
         raise HTTPException(400, "Cannot deactivate yourself")
-    con.execute("UPDATE users SET is_active = 1 - is_active WHERE id = ?", (uid,))
-    con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
+    target = con.execute("SELECT is_active FROM users WHERE id = ?", (uid,)).fetchone()
+    if target is None:
+        raise HTTPException(404)
+    admin_ops.set_user_active(con, uid, not target["is_active"])
     return RedirectResponse("/admin/users", status_code=303)
 
 
@@ -1674,7 +1651,7 @@ def reset_password(uid: int, request: Request, user=Depends(require_admin),
     target = con.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
     if target is None:
         raise HTTPException(404)
-    pw = _temp_password()
+    pw = admin_ops.temp_password()
     con.execute("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
                 (hash_password(pw), uid))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
@@ -1759,21 +1736,84 @@ def _token_lineages(rows, now: datetime) -> list[dict]:
         while parent in by_id:
             retired += 1
             parent = by_id[parent]["rotated_from_id"]
-        groups.append({"head": _token_view(r, now), "prior": prior,
-                       "retired": retired})
+        head = _token_view(r, now)
+        # A dead head whose previous secret is still in grace is not dead
+        # history yet: clearing it would hide a secret that still authenticates.
+        groups.append({"head": head, "prior": prior, "retired": retired,
+                       "clearable": not head["live"]
+                       and not any(p["live"] for p in prior)})
     return groups
 
 
+# The SQL twin of auth.api_token_from_value's live test. Evaluated by SQLite
+# against datetime('now') exactly as auth does, so the two cannot disagree
+# about the second a grace window closes.
+_TOKEN_DEAD = ("(revoked_at IS NOT NULL OR "
+               "(expires_at IS NOT NULL AND expires_at <= datetime('now')))")
+
+
+def _clear_chain(con: sqlite3.Connection, tid: int) -> tuple[list[int], str]:
+    """The ids that clearing token `tid` must flag, or an error saying why not.
+
+    Clearing takes the token's older generations with it. The page nests a
+    lineage under its newest visible row, so clearing a previous secret alone
+    would promote the one before it to a stray row of its own - the list would
+    fill back up with the dead rows this exists to remove. Any live generation
+    in the chain refuses the lot: only a secret that can no longer
+    authenticate may leave the page, and the id in the URL is never trusted
+    for that."""
+    ids, seen, cur = [], set(), tid
+    while cur is not None and cur not in seen:
+        seen.add(cur)
+        row = con.execute(
+            f"SELECT id, name, rotated_from_id, cleared_at, {_TOKEN_DEAD} AS dead "
+            "FROM api_tokens WHERE id = ?", (cur,)).fetchone()
+        if row is None:
+            if cur == tid:
+                return [], "No such token."
+            break
+        if not row["dead"]:
+            return [], (f"{row['name']} still authenticates - revoke it (or let "
+                        "its grace period run out) before clearing it.")
+        if row["cleared_at"] is None:
+            ids.append(row["id"])
+        cur = row["rotated_from_id"]
+    return ids, ""
+
+
+def _flag_cleared(con: sqlite3.Connection, ids: list[int]) -> None:
+    # A flag rather than DELETE, and that is the whole design. entries
+    # references the token by FK, so deleting one that ever wrote a surviving
+    # number fails outright; entry_audit has no FK, so deleting one that only
+    # wrote history succeeds and silently turns its writer into "-" on
+    # Activity and "an API token" on the automated chip; and a rotated secret
+    # is its successor's rotated_from_id. Keeping the row keeps its name on
+    # every number it wrote. The `dead` re-check here is belt and braces: it
+    # holds even if a caller skipped _clear_chain.
+    con.executemany(
+        f"UPDATE api_tokens SET cleared_at = datetime('now') "
+        f"WHERE id = ? AND cleared_at IS NULL AND {_TOKEN_DEAD}",
+        [(i,) for i in ids])
+
+
 def _tokens_page(request: Request, user, con: sqlite3.Connection,
-                 new_token=None, new_name=None, new_label=None, error=None):
-    rows = con.execute("SELECT * FROM api_tokens ORDER BY created_at DESC").fetchall()
+                 new_token=None, new_name=None, new_label=None, error=None,
+                 cleared: int = 0):
+    rows = con.execute("SELECT * FROM api_tokens WHERE cleared_at IS NULL "
+                       "ORDER BY created_at DESC").fetchall()
+    lineages = _token_lineages(rows, datetime.now(timezone.utc))
+    # Rows "Clear revoked" would take off the page, so the button only shows
+    # when it has something to do and says how much.
+    dead = sum(1 + len(g["prior"]) if g["clearable"]
+               else sum(not p["live"] for p in g["prior"]) if g["head"]["live"]
+               else 0 for g in lineages)
     # The MCP connector URL carries the token in the path, and tokens are
     # hashed - so the only moment we can hand over a ready-to-paste URL is the
     # one time the raw value exists, right after create or rotate.
     base = (dbm.get_setting(con, "public_base_url")
             or str(request.base_url).rstrip("/")).rstrip("/")
     return render(request, "admin_tokens.html", user=user, active="tokens",
-                  lineages=_token_lineages(rows, datetime.now(timezone.utc)),
+                  lineages=lineages, dead=dead, cleared=cleared,
                   grace_default=ROTATE_GRACE_DAYS, grace_max=ROTATE_GRACE_MAX,
                   mcp_base=base,
                   mcp_url=f"{base}/mcp/t/{new_token}" if new_token else None,
@@ -1782,9 +1822,10 @@ def _tokens_page(request: Request, user, con: sqlite3.Connection,
 
 
 @app.get("/admin/tokens", response_class=HTMLResponse)
-def admin_tokens(request: Request, user=Depends(require_admin),
+def admin_tokens(request: Request, cleared: int = 0,
+                 user=Depends(require_admin),
                  con: sqlite3.Connection = Depends(db_dep)):
-    return _tokens_page(request, user, con)
+    return _tokens_page(request, user, con, cleared=max(0, cleared))
 
 
 @app.post("/admin/tokens", response_class=HTMLResponse)
@@ -1812,6 +1853,32 @@ def revoke_token(tid: int, user=Depends(require_admin),
                  con: sqlite3.Connection = Depends(db_dep)):
     con.execute("UPDATE api_tokens SET revoked_at = datetime('now') WHERE id = ?", (tid,))
     return RedirectResponse("/admin/tokens", status_code=303)
+
+
+@app.post("/admin/tokens/clear", response_class=HTMLResponse)
+def clear_dead_tokens(user=Depends(require_admin),
+                      con: sqlite3.Connection = Depends(db_dep)):
+    """Every revoked or expired token off the page in one go. A lineage whose
+    older secret is still in grace is skipped, not refused: the rest of the
+    sweep is still what the admin asked for."""
+    n = 0
+    for r in con.execute(f"SELECT id FROM api_tokens WHERE cleared_at IS NULL "
+                         f"AND {_TOKEN_DEAD} ORDER BY id DESC").fetchall():
+        ids, err = _clear_chain(con, r["id"])
+        if not err and ids:
+            _flag_cleared(con, ids)
+            n += len(ids)
+    return RedirectResponse(f"/admin/tokens?cleared={n}", status_code=303)
+
+
+@app.post("/admin/tokens/{tid}/delete", response_class=HTMLResponse)
+def delete_token(request: Request, tid: int, user=Depends(require_admin),
+                 con: sqlite3.Connection = Depends(db_dep)):
+    ids, err = _clear_chain(con, tid)
+    if err:
+        return _tokens_page(request, user, con, error=err)
+    _flag_cleared(con, ids)
+    return RedirectResponse(f"/admin/tokens?cleared={len(ids)}", status_code=303)
 
 
 # ---------------- activity (audit trail)

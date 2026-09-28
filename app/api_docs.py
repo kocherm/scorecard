@@ -22,15 +22,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from .api import router as api_router
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 DESCRIPTION = """\
-Read the company scorecard and write weekly numbers into it.
+Read the company scorecard, write weekly numbers into it, and manage who owns
+what.
 
 **Authentication.** Send an API token as `Authorization: Bearer sc_...`.
 Tokens are created on Admin > API tokens and shown once. Scopes: `read`
 (GET only), `write` and `read_write` (GET and writes), `admin` (everything,
-including archiving).
+including people, sections, metric definitions, targets and archiving).
+Admin accounts themselves are managed in the app, never through the API.
 
 **Weeks.** A week is identified by its Monday, `YYYY-MM-DD`, in the business
 timezone. Writes default to the last closed week, the one that is due. Future
@@ -56,7 +58,8 @@ def schema() -> dict:
             {"name": "Metrics", "description": "List metrics and write weekly values."},
             {"name": "CEO metrics", "description": "The seven CEO tiles and their "
                                                    "category breakdowns."},
-            {"name": "Admin", "description": "Structural changes. Admin tokens only."},
+            {"name": "Admin", "description": "People, sections, metric definitions, "
+                                             "targets and archiving. Admin tokens only."},
         ]
         _cache["schema"] = spec
     return _cache["schema"]

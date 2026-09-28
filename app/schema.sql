@@ -52,7 +52,13 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     -- and the superseded token gets an expires_at grace deadline so both
     -- secrets work until the integration has been switched over.
     expires_at      TEXT,
-    rotated_from_id INTEGER REFERENCES api_tokens(id)
+    rotated_from_id INTEGER REFERENCES api_tokens(id),
+    -- Cleared off Admin > API tokens. A flag and never a DELETE: entries and
+    -- entry_audit name their writer by this id and the row is what keeps
+    -- that name. Added to older DBs by migrate/token_cleared.py. No commas
+    -- in this comment: SQLite's DROP COLUMN scans back for the comma before
+    -- a column and a comma in here sends it into the comment instead.
+    cleared_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sections (

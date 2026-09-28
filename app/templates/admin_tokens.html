@@ -14,7 +14,17 @@
 {% if error %}
 <div class="flash err">{{ error }}</div>
 {% endif %}
+{% if cleared %}
+<div class="flash ok">Cleared {{ cleared }} dead token{{ 's' if cleared != 1 }} from this list. Activity and the metrics they wrote still name them.</div>
+{% endif %}
 <div class="panel">
+  {% if dead %}
+  <div class="token-clear">
+    <form method="post" action="/admin/tokens/clear">
+      <button class="btn secondary sm" onclick="return confirm('Clear {{ dead }} revoked or expired token{{ 's' if dead != 1 }} from this list? None of them can authenticate, and the numbers they wrote keep their name.')">Clear revoked ({{ dead }})</button>
+    </form>
+  </div>
+  {% endif %}
   <table class="list">
     <tr><th>Name</th><th>Scope</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr>
     {% for g in lineages %}
@@ -35,6 +45,10 @@
         <form method="post" action="/admin/tokens/{{ h.t['id'] }}/revoke">
           <button class="btn danger sm" onclick="return confirm('Revoke {{ h.t['name'] }}? Anything using it stops working immediately.')">Revoke</button>
         </form>
+        {% elif g.clearable %}
+        <form method="post" action="/admin/tokens/{{ h.t['id'] }}/delete">
+          <button class="btn secondary sm" onclick="return confirm('Delete {{ h.t['name'] }} from this list? The numbers it wrote keep its name.')">Delete</button>
+        </form>
         {% endif %}
       </td>
     </tr>
@@ -52,6 +66,10 @@
         {% if p.live %}
         <form method="post" action="/admin/tokens/{{ p.t['id'] }}/revoke">
           <button class="btn danger sm" onclick="return confirm('Revoke the previous {{ p.t['name'] }} secret now?')">Revoke now</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/tokens/{{ p.t['id'] }}/delete">
+          <button class="btn secondary sm" onclick="return confirm('Delete the previous {{ p.t['name'] }} secret from this list? The numbers it wrote keep its name.')">Delete</button>
         </form>
         {% endif %}
       </td>
