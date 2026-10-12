@@ -40,6 +40,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import admin_ops
 from . import alerts
 from . import channels
 from . import db as dbm
@@ -86,6 +87,7 @@ class Check:
 
 # ------------------------------------------------------------------ local tier
 SETTINGS_URL = "/admin/settings"
+ORPHANS_LISTED = 8   # unowned metrics named on the check before "and N more"
 
 
 def _live_metrics(con: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -131,16 +133,29 @@ def _check_metrics(con: sqlite3.Connection) -> Check:
 
 def _check_dris(con: sqlite3.Connection) -> Check:
     rows = _live_metrics(con)
-    orphans = [m for m in rows if m["dri_user_id"] is None]
     if not rows:
         return Check("dris", "Owners (DRI)", BLOCKED, "No metrics to own yet.",
                      "/admin/metrics", "Sections & metrics")
+    # Hidden sections are off the board and out of the sweeps, so they are not
+    # counted here either - the same scope as _live_metrics.
+    orphans = [m for m in admin_ops.orphaned_metrics(con) if m["is_enabled"]]
     if orphans:
+        # Name them, each linking to its own row: "3 have no DRI" sent you to
+        # the top of a long page to find out which three.
+        items = tuple({"name": m["name"], "state": WARN,
+                       "url": f"/admin/metrics#met-{m['id']}",
+                       "detail": f"{m['section']} - " + (
+                           f"{m['former_owner']} is deactivated" if m["former_owner"]
+                           else "no owner")}
+                      for m in orphans[:ORPHANS_LISTED])
+        if len(orphans) > ORPHANS_LISTED:
+            items += ({"name": f"and {len(orphans) - ORPHANS_LISTED} more", "state": WARN,
+                       "url": "/admin/metrics", "detail": ""},)
         return Check("dris", "Owners (DRI)", WARN,
                      f"{len(orphans)} of {len(rows)} metrics "
-                     f"{'has' if len(orphans) == 1 else 'have'} no DRI. Nobody is "
-                     "nudged for them and nobody is named when they go red.",
-                     "/admin/metrics", "Assign owners")
+                     f"{'has' if len(orphans) == 1 else 'have'} no active DRI. Nobody "
+                     "is nudged for them and nobody is named when they go red.",
+                     "/admin/metrics", "Assign owners", items=items)
     return Check("dris", "Owners (DRI)", OK,
                  f"Every one of the {len(rows)} live metrics has a DRI.",
                  "/admin/metrics", "Sections & metrics")

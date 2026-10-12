@@ -31,11 +31,12 @@
     {% if owners is not none %}
     <form method="post" action="/admin/metrics/{{ m.metric_id }}/owner" class="mx-owner-form">
       <input type="hidden" name="next" value="/m/{{ m.metric_id }}">
-      <select name="dri_user_id" class="mx-owner{{ ' unset' if not m.dri_user_id }}"
+      {% set gone = m.dri_user_id and m.dri_user_id not in owners|map(attribute='id') %}
+      <select name="dri_user_id" class="mx-owner{{ ' unset' if not m.dri_user_id or gone }}"
               aria-label="Owner" onchange="this.form.submit()">
         <option value="">no owner</option>
         {% for u in owners %}<option value="{{ u['id'] }}"{% if u['id'] == m.dri_user_id %} selected{% endif %}>{{ u['display_name'] }}</option>{% endfor %}
-        {% if m.dri_user_id and m.dri_user_id not in owners|map(attribute='id') %}
+        {% if gone %}
         <option value="" selected disabled>{{ m.dri_name }} (inactive)</option>{% endif %}
       </select>
       <noscript><button class="btn secondary sm">Save</button></noscript>

@@ -1555,7 +1555,7 @@ NOTIFY_CHANNELS = [("slack", "Slack"), ("telegram", "Telegram"), ("sms", "SMS"),
 
 # ---------------- users
 def _users_page(request: Request, con: sqlite3.Connection, user, sort: str = "",
-                **ctx):
+                open_uid: int = 0, **ctx):
     # Metrics owned is the fact this page existed without: it is how you see
     # that one person carries most of the board, which is a management problem
     # the list of names alone will never show. Last entry answers the other
@@ -1575,12 +1575,20 @@ def _users_page(request: Request, con: sqlite3.Connection, user, sort: str = "",
     for k in ("temp_password", "temp_user", "flash"):
         ctx.setdefault(k, None)
     total_owned = sum(u["owned"] for u in users)
+    # Each drawer lists what that person owns, so their metrics can be re-owned
+    # (one at a time, or all at once) where you decide what to do with them.
+    owned_by: dict[int, list] = {}
+    for m in con.execute(
+            """SELECT m.id, m.name, m.dri_user_id, s.name AS section
+               FROM metrics m JOIN sections s ON s.id = m.section_id
+               WHERE m.archived_at IS NULL AND m.dri_user_id IS NOT NULL
+               ORDER BY s.sort_order, m.sort_order, m.id"""):
+        owned_by.setdefault(m["dri_user_id"], []).append(m)
     return render(request, "admin_users.html", user=user, active="users",
-                  users=users, sort=sort,
-                  unowned=con.execute(
-                      "SELECT COUNT(*) c FROM metrics "
-                      "WHERE dri_user_id IS NULL AND archived_at IS NULL"
-                  ).fetchone()["c"],
+                  users=users, sort=sort, open_uid=open_uid,
+                  orphans=admin_ops.orphaned_metrics(con),
+                  owned_by=owned_by,
+                  active_users=[u for u in users if u["is_active"]],
                   total_owned=total_owned,
                   channel_labels=NOTIFY_CHANNELS,
                   reachable={u["id"] for u in users
@@ -1589,9 +1597,34 @@ def _users_page(request: Request, con: sqlite3.Connection, user, sort: str = "",
 
 
 @app.get("/admin/users", response_class=HTMLResponse)
-def admin_users(request: Request, sort: str = "", user=Depends(require_admin),
+def admin_users(request: Request, sort: str = "", open: int = 0,
+                handed: int = -1, to: int = 0, user=Depends(require_admin),
                 con: sqlite3.Connection = Depends(db_dep)):
-    return _users_page(request, con, user, sort=sort)
+    ctx = {}
+    if handed >= 0:
+        names = dict(con.execute("SELECT id, display_name FROM users "
+                                 "WHERE id IN (?, ?)", (open, to)).fetchall())
+        ctx["flash"] = (f"Handed {handed} metric{'' if handed == 1 else 's'} from "
+                        f"{names.get(open, '?')} to {names.get(to, '?')}.")
+    return _users_page(request, con, user, sort=sort, open_uid=open, **ctx)
+
+
+@app.post("/admin/users/{uid}/handover")
+def hand_over_metrics(uid: int, to_user_id: int = Form(...), user=Depends(require_admin),
+                      con: sqlite3.Connection = Depends(db_dep)):
+    """Give everything one person owns to someone else in one step - the job
+    deactivating someone leaves behind, which used to be one Edit form per
+    metric."""
+    if to_user_id == uid:
+        raise HTTPException(422, "Pick someone else")
+    if not con.execute("SELECT 1 FROM users WHERE id = ?", (uid,)).fetchone():
+        raise HTTPException(404)
+    if not con.execute("SELECT 1 FROM users WHERE id = ? AND is_active = 1",
+                       (to_user_id,)).fetchone():
+        raise HTTPException(422, f"No active user {to_user_id}")
+    n = admin_ops.hand_over(con, uid, to_user_id)
+    return RedirectResponse(
+        f"/admin/users?open={uid}&handed={n}&to={to_user_id}#usr-{uid}", status_code=303)
 
 
 @app.post("/admin/users", response_class=HTMLResponse)

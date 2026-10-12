@@ -49,6 +49,29 @@ def set_user_active(con: sqlite3.Connection, uid: int, active: bool) -> None:
         con.execute("DELETE FROM sessions WHERE user_id = ?", (uid,))
 
 
+def orphaned_metrics(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Live metrics nobody active owns: no owner at all, or an owner who has
+    been deactivated. Both mean the same thing in practice - the sweeps only
+    nudge active people - so the screens that warn about one warn about both.
+    Carries the section (and whether it is shown) and the former owner's name."""
+    return con.execute(
+        """SELECT m.id, m.name, s.name AS section, s.is_enabled,
+                  u.display_name AS former_owner
+           FROM metrics m JOIN sections s ON s.id = m.section_id
+           LEFT JOIN users u ON u.id = m.dri_user_id
+           WHERE m.archived_at IS NULL
+             AND (m.dri_user_id IS NULL OR u.is_active IS NOT 1)
+           ORDER BY s.sort_order, m.sort_order, m.id""").fetchall()
+
+
+def hand_over(con: sqlite3.Connection, from_uid: int, to_uid: int) -> int:
+    """Move every live metric one person owns to another; archived rows keep
+    the owner they had. Returns how many moved."""
+    return con.execute(
+        "UPDATE metrics SET dri_user_id = ? WHERE dri_user_id = ? AND archived_at IS NULL",
+        (to_uid, from_uid)).rowcount
+
+
 def clean_name(name: str) -> str:
     return " ".join(name.split())
 

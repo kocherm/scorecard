@@ -89,3 +89,93 @@ def test_metric_page_offers_the_picker_to_admins_only(env):
     c.post("/logout")
     c.cookies.clear()
     assert 'action="/admin/metrics/7/owner"' not in login(c, "m@x.co").get("/m/7").text
+
+
+# ------------------------------------------------- Users page: hand metrics over
+def add_metric(mid, name, dri, archived=False):
+    with dbm.get_db() as con:
+        con.execute(
+            """INSERT INTO metrics (id, section_id, name, metric_type, rollup, direction,
+                                    dri_user_id, start_week, sort_order, archived_at)
+               VALUES (?, 1, ?, 'numeric', 'sum', 'up', ?, '2026-01-05', ?, ?)""",
+            (mid, name, dri, mid, "2026-02-01" if archived else None))
+
+
+def owners():
+    with dbm.get_db() as con:
+        return dict(con.execute("SELECT id, dri_user_id FROM metrics").fetchall())
+
+
+def test_drawer_lists_what_each_person_owns_with_a_picker(env):
+    add_metric(8, "Demos", 2)
+    body = login(env, "b@x.co").get("/admin/users").text
+    drawer = body.split('id="usr-2"')[1].split('class="usr-drawer"')[0]
+    assert "Metrics they own (1)" in drawer
+    assert 'action="/admin/metrics/8/owner"' in drawer
+    assert 'value="/admin/users?open=2#usr-2"' in drawer
+    assert 'action="/admin/users/2/handover"' in drawer
+    # The hand-over list offers active people other than the owner.
+    hand = drawer.split('action="/admin/users/2/handover"')[1].split("</form>")[0]
+    assert ">Boss<" in hand and ">Mo<" not in hand and ">Gone<" not in hand
+
+
+def test_hand_over_moves_every_live_metric_and_reopens_the_drawer(env):
+    add_metric(8, "Demos", 3)
+    add_metric(9, "Calls booked", 3)
+    add_metric(10, "Old one", 3, archived=True)
+    c = login(env, "b@x.co")
+    r = c.post("/admin/users/3/handover", data={"to_user_id": "2"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/admin/users?open=3&handed=2&to=2#usr-3"
+    o = owners()
+    assert o[8] == 2 and o[9] == 2
+    assert o[10] == 3            # archived rows keep the owner they had
+    page = c.get(r.headers["location"]).text
+    assert "Handed 2 metrics from Gone to Mo." in page
+    assert '<tr class="usr-drawer" id="usr-3">' in page        # open, not hidden
+
+
+def test_hand_over_refuses_self_and_inactive_targets(env):
+    add_metric(8, "Demos", 2)
+    c = login(env, "b@x.co")
+    assert c.post("/admin/users/2/handover", data={"to_user_id": "2"}).status_code == 422
+    assert c.post("/admin/users/2/handover", data={"to_user_id": "3"}).status_code == 422
+    assert c.post("/admin/users/99/handover", data={"to_user_id": "1"}).status_code == 404
+    assert owners()[8] == 2
+
+
+def test_deactivate_note_warns_when_they_still_own_metrics(env):
+    add_metric(8, "Demos", 2)
+    drawer = login(env, "b@x.co").get("/admin/users").text.split('id="usr-2"')[1]
+    assert "hand the 1 above to someone first" in drawer
+
+
+# ----------------------------------------- "no owner" warnings name the metrics
+def test_users_banner_names_unowned_and_deactivated_owner_metrics(env):
+    add_metric(8, "Demos", 3)                  # owned by someone deactivated
+    add_metric(9, "Fine", 2)
+    body = login(env, "b@x.co").get("/admin/users").text
+    banner = body.split('class="flash warn"')[1].split("</div>")[0]
+    assert "2 live metrics have no active owner" in banner
+    assert '<a href="/admin/metrics#met-7">Calls</a>' in banner
+    assert '<a href="/admin/metrics#met-8">Demos</a>' in banner and "Gone, deactivated" in banner
+    assert "Fine" not in banner
+
+
+def test_metric_rows_carry_the_anchor_the_warnings_link_to(env):
+    assert '<tr id="met-7">' in login(env, "b@x.co").get("/admin/metrics").text
+
+
+def test_status_check_lists_each_unowned_metric(env):
+    from datetime import datetime, timezone
+    from app import readiness
+    add_metric(8, "Demos", 3)
+    with dbm.get_db() as con:
+        c = next(c for c in readiness.local_checks(con, datetime.now(timezone.utc))
+                 if c.key == "dris")
+    assert c.state == readiness.WARN
+    assert [(i["name"], i["url"]) for i in c.items] == [
+        ("Calls", "/admin/metrics#met-7"), ("Demos", "/admin/metrics#met-8")]
+    assert "Gone is deactivated" in c.items[1]["detail"]
+    page = login(env, "b@x.co").get("/admin/status").text
+    assert '<a href="/admin/metrics#met-8">Demos</a>' in page

@@ -147,7 +147,7 @@
     <tbody>
       {% for m in s['metrics'] %}
       {% set w = writers.get(m['id']) %}
-      <tr>
+      <tr id="met-{{ m['id'] }}">
         <td class="ord">
           {# sort_order has been in the schema from the start with no way to
              change it here. Buttons, not drag: keyboard-reachable and precise. #}
@@ -175,11 +175,13 @@
              behind Edit, and the plain-text name here gave no hint of that. #}
           <form method="post" action="/admin/metrics/{{ m['id'] }}/owner" class="met-owner-form">
             <input type="hidden" name="next" value="/admin/metrics#sec-{{ s['id'] }}">
-            <select name="dri_user_id" class="met-owner{{ ' unset' if not m['dri_user_id'] }}"
+            {# A deactivated owner reads red too: nobody is nudged either way. #}
+            {% set gone = m['dri_user_id'] and m['dri_user_id'] not in users|map(attribute='id') %}
+            <select name="dri_user_id" class="met-owner{{ ' unset' if not m['dri_user_id'] or gone }}"
                     aria-label="Owner of {{ m['name'] }}" onchange="this.form.submit()">
               <option value="">no owner</option>
               {% for u in users %}<option value="{{ u['id'] }}"{% if u['id'] == m['dri_user_id'] %} selected{% endif %}>{{ u['display_name'] }}</option>{% endfor %}
-              {% if m['dri_user_id'] and m['dri_user_id'] not in users|map(attribute='id') %}
+              {% if gone %}
               <option value="" selected disabled>{{ m['dri_name'] or 'unknown' }} (inactive)</option>{% endif %}
             </select>
             <noscript><button class="btn secondary sm">Save</button></noscript>

@@ -53,7 +53,7 @@
         {% if c.items %}
         <ul class="status-sub">
           {% for i in c.items %}
-          <li><span class="dot {{ i.state }}"></span>{{ i.name }} <span class="note">{{ i.detail }}</span></li>
+          <li><span class="dot {{ i.state }}"></span>{% if i.url %}<a href="{{ i.url }}">{{ i.name }}</a>{% else %}{{ i.name }}{% endif %} <span class="note">{{ i.detail }}</span></li>
           {% endfor %}
         </ul>
         {% endif %}
@@ -86,7 +86,7 @@
         {% if c.items %}
         <ul class="status-sub">
           {% for i in c.items %}
-          <li><span class="dot {{ i.state }}"></span>{{ i.name }} <span class="note">{{ i.detail }}</span></li>
+          <li><span class="dot {{ i.state }}"></span>{% if i.url %}<a href="{{ i.url }}">{{ i.name }}</a>{% else %}{{ i.name }}{% endif %} <span class="note">{{ i.detail }}</span></li>
           {% endfor %}
         </ul>
         {% endif %}

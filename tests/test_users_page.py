@@ -45,7 +45,7 @@ def test_the_page_shows_how_the_board_is_distributed(env):
     body = env.get("/admin/users").text
     assert "Metrics owned" in body
     assert 'class="usr-share"' in body        # the share bar, not just a count
-    assert "1 live metric has no owner" in body
+    assert "1 live metric has no active owner" in body
 
 
 def test_sorting_by_owned_puts_the_imbalance_first(env):

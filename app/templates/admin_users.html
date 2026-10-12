@@ -11,11 +11,18 @@
   again. They will be asked to change it on first sign-in.</div>
 {% endif %}
 {% if flash %}<div class="flash {{ flash_kind or 'ok' }}">{{ flash }}</div>{% endif %}
-{% if unowned %}
-{% set one = unowned == 1 %}
-<div class="flash warn">{{ unowned }} live metric{{ '' if one else 's' }} {{ 'has' if one else 'have' }} no owner &mdash;
+{% if orphans %}
+{% set n = orphans|length %}{% set one = n == 1 %}
+{# Named, each linking to its own row: a count sent you to the top of a long
+   page to find out which ones. #}
+<div class="flash warn">{{ n }} live metric{{ '' if one else 's' }} {{ 'has' if one else 'have' }} no active owner &mdash;
   nobody is nudged for {{ 'it' if one else 'them' }}, and {{ 'it' if one else 'they' }} can never go
-  red at a person. <a href="/admin/metrics">Assign a DRI</a>.</div>
+  red at a person:
+  {% for m in orphans[:6] -%}
+  <a href="/admin/metrics#met-{{ m['id'] }}">{{ m['name'] }}</a>
+  {%- if m['former_owner'] %} <span class="note">({{ m['former_owner'] }}, deactivated)</span>{% endif %}
+  {{- ', ' if not loop.last else '' }}
+  {%- endfor %}{% if n > 6 %}, and <a href="/admin/metrics">{{ n - 6 }} more</a>{% endif %}.</div>
 {% endif %}
 
 <div class="panel usr-panel">
@@ -57,11 +64,13 @@
         <td class="note">{{ u['last_entry'][:10] if u['last_entry'] else 'never' }}</td>
         <td><span class="chip {{ 'on' if u['is_active'] else 'off' }}">{{ 'active' if u['is_active'] else 'deactivated' }}</span></td>
         <td class="r">
+          {% set is_open = u['id'] == open_uid %}
           <button type="button" class="btn secondary sm usr-toggle"
-                  aria-expanded="false" aria-controls="usr-{{ u['id'] }}">Manage</button>
+                  aria-expanded="{{ 'true' if is_open else 'false' }}"
+                  aria-controls="usr-{{ u['id'] }}">{{ 'Close' if is_open else 'Manage' }}</button>
         </td>
       </tr>
-      <tr class="usr-drawer" id="usr-{{ u['id'] }}" hidden>
+      <tr class="usr-drawer" id="usr-{{ u['id'] }}"{% if not is_open %} hidden{% endif %}>
         <td colspan="6">
           <div class="usr-grid">
 
@@ -122,12 +131,51 @@
               </div>
             </section>
 
+            {% set mine = owned_by.get(u['id'], []) %}
+            {% set others = active_users|rejectattr('id', 'equalto', u['id'])|list %}
+            <section class="usr-metrics">
+              <h3>Metrics {{ 'they own' if u['id'] != user['id'] else 'you own' }} ({{ mine|length }})</h3>
+              {% if mine %}
+              <ul class="usr-mlist">
+                {% for m in mine %}
+                <li>
+                  <a class="met-name" href="/m/{{ m['id'] }}">{{ m['name'] }}</a>
+                  <span class="note">{{ m['section'] }}</span>
+                  <form method="post" action="/admin/metrics/{{ m['id'] }}/owner" class="met-owner-form">
+                    <input type="hidden" name="next" value="/admin/users?open={{ u['id'] }}#usr-{{ u['id'] }}">
+                    <select name="dri_user_id" class="met-owner{{ ' unset' if not u['is_active'] }}" aria-label="Owner of {{ m['name'] }}"
+                            onchange="this.form.submit()">
+                      <option value="">no owner</option>
+                      {% for o in active_users %}<option value="{{ o['id'] }}"{% if o['id'] == u['id'] %} selected{% endif %}>{{ o['display_name'] }}</option>{% endfor %}
+                      {% if not u['is_active'] %}<option value="" selected disabled>{{ u['display_name'] }} (inactive)</option>{% endif %}
+                    </select>
+                    <noscript><button class="btn secondary sm">Save</button></noscript>
+                  </form>
+                </li>
+                {% endfor %}
+              </ul>
+              {% if others %}
+              <form method="post" action="/admin/users/{{ u['id'] }}/handover" class="usr-handover">
+                <label for="hand-{{ u['id'] }}">Hand all {{ mine|length }} to</label>
+                <select name="to_user_id" id="hand-{{ u['id'] }}" required>
+                  <option value="" disabled selected>pick someone</option>
+                  {% for o in others %}<option value="{{ o['id'] }}">{{ o['display_name'] }}</option>{% endfor %}
+                </select>
+                <button class="btn secondary sm">Hand over</button>
+              </form>
+              {% endif %}
+              {% else %}
+              <p class="note">None. Assign metrics on <a href="/admin/metrics">Sections &amp; metrics</a>.</p>
+              {% endif %}
+            </section>
+
             {% if u['id'] != user['id'] %}
             <section class="usr-danger">
               <h3>{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</h3>
               <p class="note">
                 {%- if u['is_active'] %}Signs them out and blocks sign-in. Their metrics keep
-                their history and stay assigned to them.
+                their history and stay assigned to them
+                {%- if mine %}, so nobody is nudged for them: hand the {{ mine|length }} above to someone first{% endif %}.
                 {%- else %}Lets them sign in again with their existing password.{% endif %}</p>
               <form method="post" action="/admin/users/{{ u['id'] }}/toggle">
                 <button class="btn danger sm">{{ 'Deactivate' if u['is_active'] else 'Reactivate' }}</button>
