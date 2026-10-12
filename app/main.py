@@ -1034,12 +1034,19 @@ def metric_page(metric_id: int, request: Request, year: int = 0, quarter: int = 
     # "Enter" is only offered to the person whose page it would actually work
     # on: /checkin lists the metrics you own, so an editor who is not the DRI
     # would follow the link and find the metric missing.
+    demo_on = dbm.get_setting(real, "display_demo_data", "0") == "1"
+    # Admins re-own the metric right here, where its owner is shown. Not in
+    # demo mode: the page reads the demo db, and its ids mean nothing in the real one.
+    owners = (real.execute("SELECT id, display_name FROM users WHERE is_active = 1 "
+                           "ORDER BY display_name").fetchall()
+              if user["role"] == "admin" and not demo_on and not mvm.archived else None)
     return render(request, "metric.html", user=user, active="grid", m=mvm,
                   audit=_audit_items(con, metric_id, limit=40), otos=otos,
+                  owners=owners,
                   can_edit=user["role"] in ("editor", "admin"),
                   can_enter=(user["role"] != "viewer" and not mvm.archived
                              and mvm.dri_user_id == _data_actor_id(con, user)),
-                  demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1")
+                  demo_on=demo_on)
 
 
 # ---------------------------------------------------------------- 1-3-1
@@ -1380,6 +1387,26 @@ def toggle_key_metric(metric_id: int, user=Depends(require_admin),
     _metric_or_404(con, metric_id)
     con.execute("UPDATE metrics SET is_key = 1 - is_key WHERE id = ?", (metric_id,))
     return RedirectResponse("/admin/metrics", status_code=303)
+
+
+@app.post("/admin/metrics/{metric_id}/owner")
+def set_metric_owner(metric_id: int, dri_user_id: str = Form(""), next: str = Form(""),
+                     user=Depends(require_admin),
+                     con: sqlite3.Connection = Depends(db_dep)):
+    """Reassign one metric from wherever it is shown, without the full edit
+    form. Owning a metric is the most common change an admin makes, and it
+    used to be reachable only behind Edit - where nobody looked for it."""
+    m = _metric_or_404(con, metric_id)
+    uid = int(dri_user_id) if dri_user_id else None
+    # An inactive owner is a metric nobody is nudged about (see api._owner_or_422).
+    if uid is not None and not con.execute(
+            "SELECT 1 FROM users WHERE id = ? AND is_active = 1", (uid,)).fetchone():
+        raise HTTPException(422, f"No active user {uid}")
+    con.execute("UPDATE metrics SET dri_user_id = ? WHERE id = ?", (uid, metric_id))
+    # Only ever back to a page of this app: never an open redirect.
+    if not (next.startswith("/") and not next.startswith("//")):
+        next = f"/admin/metrics#sec-{m['section_id']}"
+    return RedirectResponse(next, status_code=303)
 
 
 @app.post("/admin/sections")

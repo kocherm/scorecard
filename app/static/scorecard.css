@@ -1597,6 +1597,17 @@ th.subtotal.first, td.subtotal.first { border-left: 1px solid var(--pearl); }
 .met-name:hover { color: var(--accent); }
 .met-dri { color: var(--slate); }
 .met-noowner { color: var(--red-deep); font-weight: 500; }
+.met-owner-form, .mx-owner-form { margin: 0; }
+/* A select that reads as text until you reach for it: the owner is a fact on
+   the page first and a control second. */
+.met-owner, .mx-owner {
+  font: inherit; color: var(--slate); background: transparent; cursor: pointer;
+  border: 1px solid transparent; border-radius: 6px; padding: 3px 4px; max-width: 100%;
+}
+.met-owner:hover, .mx-owner:hover { border-color: var(--cloud); }
+.met-owner:focus-visible, .mx-owner:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.met-owner.unset, .mx-owner.unset { color: var(--red-deep); font-weight: 500; }
+.mx-owner { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--navy); margin: 3px 0 1px -5px; }
 /* An automation owning a metric is a fact people used to discover by reading
    the audit table after a number kept reverting. */
 .met .chip.api { background: var(--amber-subtle); color: var(--amber-deep); margin-left: 6px; }

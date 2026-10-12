@@ -28,7 +28,21 @@
   </div>
   <div class="mx-fact">
     <div class="k">Owner</div>
+    {% if owners is not none %}
+    <form method="post" action="/admin/metrics/{{ m.metric_id }}/owner" class="mx-owner-form">
+      <input type="hidden" name="next" value="/m/{{ m.metric_id }}">
+      <select name="dri_user_id" class="mx-owner{{ ' unset' if not m.dri_user_id }}"
+              aria-label="Owner" onchange="this.form.submit()">
+        <option value="">no owner</option>
+        {% for u in owners %}<option value="{{ u['id'] }}"{% if u['id'] == m.dri_user_id %} selected{% endif %}>{{ u['display_name'] }}</option>{% endfor %}
+        {% if m.dri_user_id and m.dri_user_id not in owners|map(attribute='id') %}
+        <option value="" selected disabled>{{ m.dri_name }} (inactive)</option>{% endif %}
+      </select>
+      <noscript><button class="btn secondary sm">Save</button></noscript>
+    </form>
+    {% else %}
     <div class="v name">{{ m.dri_name }}</div>
+    {% endif %}
     <div class="s">
       {%- if m.red_streak %}<b class="mx-red">red {{ m.red_streak }} week{{ '' if m.red_streak == 1 else 's' }}</b>
       {%- else %}not in a red streak{% endif %}</div>
