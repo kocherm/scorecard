@@ -204,7 +204,8 @@
           <a class="btn secondary sm" href="/admin/metrics/{{ m['id'] }}">Edit</a>
           <form method="post" action="/admin/metrics/{{ m['id'] }}/archive">
             <button class="btn danger sm"
-                    onclick="return confirm('Archive {{ m['name'] }}? History is kept.')">Archive</button>
+                    data-confirm="Archive {{ m['name'] }}? History is kept."
+                    onclick="return confirm(this.dataset.confirm)">Archive</button>
           </form>
         </td>
       </tr>

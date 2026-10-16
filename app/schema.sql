@@ -35,7 +35,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at   TEXT NOT NULL,
     last_seen_at TEXT,
     -- set while an admin is "viewing as" another user; audit stays on user_id
-    impersonate_user_id INTEGER REFERENCES users(id)
+    impersonate_user_id INTEGER REFERENCES users(id),
+    -- 'full' (password/passkey/reset) or 'checkin' (redeemed a check-in link:
+    -- short-lived, no admin, no credentials - see auth.py). Older DBs get it
+    -- from migrate/session_scope; never index it here (replayed pre-migration).
+    scope        TEXT NOT NULL DEFAULT 'full'
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
@@ -129,6 +133,10 @@ CREATE TABLE IF NOT EXISTS entry_audit (
     actor_token_id INTEGER,
     changed_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+-- Safe to replay on an old DB: metric_id has been in this table since the
+-- first schema (an index naming a MIGRATED column would fail at boot). The
+-- rowid rides in every index, so this also serves "... ORDER BY id DESC".
+CREATE INDEX IF NOT EXISTS idx_entry_audit_metric ON entry_audit(metric_id);
 
 CREATE TABLE IF NOT EXISTS one_three_ones (
     id             INTEGER PRIMARY KEY,
@@ -245,7 +253,8 @@ CREATE TABLE IF NOT EXISTS sweep_runs (
     kind       TEXT    NOT NULL CHECK (kind IN
                  ('nudge1','nudge2','summary','stale','red')),
     ran_at     TEXT    NOT NULL DEFAULT (datetime('now')),
-    outcome    TEXT    NOT NULL CHECK (outcome IN ('sent','nothing','skipped')),
+    outcome    TEXT    NOT NULL CHECK (outcome IN
+                 ('sent','nothing','skipped','error')),
     detail     TEXT    NOT NULL,
     sent_count INTEGER NOT NULL DEFAULT 0
 );

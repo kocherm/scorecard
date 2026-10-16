@@ -134,8 +134,49 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d scorecard.example.com
 ```
 
-The database lives in the `scorecard-data` Docker volume. Backup = copy one
-SQLite file. Moving servers = move the volume and the gitignored local files.
+The database lives in the `scorecard-data` Docker volume. Moving servers = move
+the volume and the gitignored local files. The image installs `requirements.txt`,
+which is generated from `uv.lock` with exact pins (regenerate it after changing
+dependencies - the command is in the Dockerfile). `GET /healthz` (no auth)
+answers `{"ok", "db", "scheduler"}`, with 503 when the database cannot answer;
+the compose healthcheck uses it.
+
+### Backups
+
+Do NOT copy `scorecard.db` by hand while the app runs: it is in WAL mode, so
+recent writes live in `scorecard.db-wal` and a plain file copy can be missing
+them or torn. `deploy/backup.sh` uses SQLite's online backup API, runs
+`PRAGMA integrity_check` on the snapshot, and only then moves it into
+`~/scorecard-backups` (14-day rotation). A failure exits non-zero with
+`backup FAILED` and leaves the earlier backups alone. Run it nightly from cron
+(see the header of the script). A backup on the same disk is not a backup:
+set `BACKUP_REMOTE` to an rsync/scp target to copy each verified snapshot off
+the host:
+
+```bash
+15 2 * * * BACKUP_REMOTE=backup@backup.example.com:/srv/backups/scorecard/ /home/USER/scorecard/deploy/backup.sh >> /home/USER/scorecard-backups/backup.log 2>&1
+```
+
+### Restore
+
+```bash
+cd ~/scorecard
+docker compose stop scorecard
+gunzip -c ~/scorecard-backups/scorecard-YYYYMMDD-HHMM.db.gz > /tmp/restore.db
+docker compose cp /tmp/restore.db scorecard:/srv/scorecard/data/restore.db
+# Move the live db AND its -wal/-shm aside together. A -wal left next to the
+# restored file would be replayed into it on open and corrupt it.
+docker compose run --rm --no-deps scorecard sh -c 'cd /srv/scorecard/data &&
+  for f in scorecard.db scorecard.db-wal scorecard.db-shm; do
+    [ -e "$f" ] && mv "$f" "pre-restore-$f"; done; mv restore.db scorecard.db'
+docker compose start scorecard
+# Verify: healthy, intact, and the numbers you expect.
+curl -fsS http://127.0.0.1:8096/healthz
+docker compose exec scorecard python -c "import sqlite3; print(sqlite3.connect('/srv/scorecard/data/scorecard.db').execute('PRAGMA integrity_check').fetchone()[0])"
+```
+
+Then open the board and Admin > Activity and check the latest week is the one
+you expected. Delete the `pre-restore-*` files once you are satisfied.
 
 ## TV appliance (Raspberry Pi)
 

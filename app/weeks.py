@@ -156,3 +156,35 @@ def rotation_pick(now: datetime, options: list, seconds: int):
     if seconds <= 0:
         return options[0]
     return options[int(now.timestamp()) // seconds % len(options)]
+
+
+# ---- months, for the numbers read per month (CEO revenue per employee).
+# The same rule as the bands: a week belongs to the month of its Monday, so a
+# month is exactly the Mondays that fall in it and is CLOSED once the last of
+# those weeks has closed (which can be a few days into the next month).
+def mondays_in_month(year: int, month: int) -> list[date]:
+    first = date(year, month, 1)
+    d = first + timedelta(days=(7 - first.weekday()) % 7)
+    out = []
+    while d.month == month:
+        out.append(d)
+        d += timedelta(days=7)
+    return out
+
+
+def last_closed_month(now: datetime, tz: ZoneInfo = BUSINESS_TZ) -> tuple[int, int]:
+    """(year, month) of the newest month whose every week has closed."""
+    closed = last_closed_week(now, tz)
+    if (closed + timedelta(days=7)).month != closed.month:
+        return closed.year, closed.month
+    return month_shift((closed.year, closed.month), -1)
+
+
+def month_shift(ym: tuple[int, int], n: int) -> tuple[int, int]:
+    i = ym[0] * 12 + (ym[1] - 1) + n
+    return i // 12, i % 12 + 1
+
+
+def months_ending(ym: tuple[int, int], count: int) -> list[tuple[int, int]]:
+    """`count` consecutive months, oldest first, ending with `ym`."""
+    return [month_shift(ym, i) for i in range(1 - count, 1)]

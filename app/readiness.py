@@ -161,6 +161,65 @@ def _check_dris(con: sqlite3.Connection) -> Check:
                  "/admin/metrics", "Sections & metrics")
 
 
+TARGET_LEAD_DAYS = 14   # warn this long before a quarter that has no targets yet
+
+
+def _untargeted(con: sqlite3.Connection, year: int, quarter: int) -> list[sqlite3.Row]:
+    """Live numeric metrics in enabled sections with no target row for the
+    quarter. Status and binary metrics never need one (scoring.cell_state
+    scores them without a target), and a metric that starts after the
+    quarter is over has nothing to score in it yet."""
+    end = wk.first_monday_of_quarter(*((year + 1, 1) if quarter == 4
+                                       else (year, quarter + 1)))
+    have = {r["metric_id"] for r in con.execute(
+        "SELECT metric_id FROM targets WHERE year = ? AND quarter = ?",
+        (year, quarter))}
+    return [m for m in _live_metrics(con)
+            if m["metric_type"] == "numeric" and m["id"] not in have
+            and m["start_week"] < end.isoformat()]
+
+
+def _target_check(con: sqlite3.Connection, key: str, label: str,
+                  year: int, quarter: int, when: str) -> Check:
+    q = f"Q{quarter} {year}"
+    fix = (f"/admin/targets?year={year}&quarter={quarter}", f"Set {q} targets")
+    missing = _untargeted(con, year, quarter)
+    if not missing:
+        return Check(key, label, OK,
+                     f"Every live numeric metric has a {q} target{when}.", *fix)
+    items = tuple({"name": m["name"], "state": WARN, "url": f"/m/{m['id']}",
+                   "detail": "no target"} for m in missing[:ORPHANS_LISTED])
+    if len(missing) > ORPHANS_LISTED:
+        items += ({"name": f"and {len(missing) - ORPHANS_LISTED} more", "state": WARN,
+                   "url": fix[0], "detail": ""},)
+    n = len(missing)
+    return Check(key, label, WARN,
+                 f"{n} {'metric has' if n == 1 else 'metrics have'} no {q} "
+                 f"target{when}. Without one a metric shows no colour and is "
+                 "left out of red streaks, so it cannot raise an alert.",
+                 *fix, items=items)
+
+
+def _check_targets(con: sqlite3.Connection, now: datetime) -> list[Check]:
+    """The current quarter always; the next one only once it is close. A new
+    quarter with no targets silently stops every alert on the board - nothing
+    turns red, so nothing escalates - and nothing else says so. With no live
+    metrics at all there is nothing to target, and "Metrics" above already
+    says so; an OK row here would read as configured when nothing is."""
+    if not _live_metrics(con):
+        return []
+    today = now.astimezone(wk.BUSINESS_TZ).date()
+    y, q = wk.quarter_of(wk.current_week(now))
+    out = [_target_check(con, "targets", "Targets this quarter", y, q, "")]
+    ny, nq = (y + 1, 1) if q == 4 else (y, q + 1)
+    days = (wk.first_monday_of_quarter(ny, nq) - today).days
+    if 0 <= days <= TARGET_LEAD_DAYS:
+        out.append(_target_check(
+            con, "targets_next", "Targets next quarter", ny, nq,
+            f" - it starts in {days} day{'' if days == 1 else 's'}"))
+    return out
+
+
 def _check_slack_credentials(con: sqlite3.Connection) -> Check:
     bot = dbm.get_setting(con, "slack_bot_token") or ""
     hook = dbm.get_setting(con, "slack_webhook_url") or ""
@@ -386,6 +445,7 @@ def local_checks(con: sqlite3.Connection, now: datetime) -> list[Check]:
         _check_people(con),
         _check_metrics(con),
         _check_dris(con),
+        *_check_targets(con, now),
         _check_display_token(con),
         _check_slack_credentials(con),
         _check_slack_channel(con),
@@ -666,7 +726,7 @@ SWEEP_LABELS = {
     "nudge2": "Check-in nudge - Tuesday 9:00 AM",
     "stale": "Stale roll-up - Wednesday 8:00 AM",
 }
-SWEEP_STATE = {"sent": OK, "nothing": OK, "skipped": WARN}
+SWEEP_STATE = {"sent": OK, "nothing": OK, "skipped": WARN, "error": BLOCKED}
 
 
 def sweep_runs(con: sqlite3.Connection, now: datetime) -> list[dict]:

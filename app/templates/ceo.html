@@ -133,6 +133,74 @@
   </section>
 </div>
 
+{#- Revenue per employee (grid.build_rpe): one number per CLOSED month, its
+    change on the month before and the year before, and the last twelve
+    months as bars. Annualized is a link (?rpe=year), so it can be shared;
+    the data is identical, x12 at display. -#}
+{% macro delta(v, vs) %}
+{%- if v is not none %}<span class="rpe-delta {{ 'up' if v >= 0 else 'down' }}">{{ '+' if v >= 0 else '&minus;'|safe }}{{ '%.1f'|format(v|abs) }}%</span> <span class="note">{{ vs }}</span>{% endif %}
+{%- endmacro %}
+<section class="card ceo-band rpe" id="rpe">
+  <div class="section-head"><span class="icon">{{ icon('users') }}</span><h2>Revenue per employee</h2>
+    <nav class="rpe-mode" aria-label="Show revenue per employee">
+      <a href="/ceo#rpe"{% if not rpe.annual %} class="on" aria-current="true"{% endif %}>Monthly</a>
+      <a href="/ceo?rpe=year#rpe"{% if rpe.annual %} class="on" aria-current="true"{% endif %}>Annualized</a>
+    </nav>
+  </div>
+  {% if not rpe.has_revenue %}
+  <p class="note rpe-empty">Needs revenue. {% if user['role'] == 'admin' %}<a href="/admin/settings?tab=display#ceo-view">Map a metric to Revenue</a>{% else %}An admin can map it.{% endif %}</p>
+  {% elif not rpe.has_headcount %}
+  <p class="note rpe-empty">Needs a headcount. {% if user['role'] == 'admin' %}<a href="/admin/settings?tab=display#ceo-headcount">Add headcount</a> &mdash; once, and again only when it changes.{% else %}An admin can add it under Settings.{% endif %}</p>
+  {% elif not rpe.latest %}
+  <p class="note rpe-empty">No closed month has both revenue and a headcount yet. It appears once a month&rsquo;s last week closes.</p>
+  {% else %}
+  {% set L = rpe.latest %}
+  <div class="rpe-body">
+    <div class="rpe-head">
+      <div class="ceo-label">{{ L.long_label }}{% if rpe.annual %} &middot; run rate{% endif %}</div>
+      <div class="rpe-num">{{ rpe.value_display }}</div>
+      <div class="ceo-sub">per employee {{ 'per year' if rpe.annual else 'per month' }}</div>
+      <div class="rpe-calc">{{ rpe.revenue_display }} revenue &divide; {{ rpe.headcount_display }} {{ 'employee' if L.headcount == 1 else 'employees' }}{% if rpe.annual %} &times; 12{% endif %}</div>
+      <div class="rpe-deltas">
+        {% if rpe.mom is not none %}<div>{{ delta(rpe.mom, 'on the month before') }}</div>{% endif %}
+        {% if rpe.yoy is not none %}<div>{{ delta(rpe.yoy, 'on a year ago') }}</div>{% endif %}
+      </div>
+      {% if L.partial %}<span class="chip warn">{{ L.weeks_entered }} of {{ L.weeks_expected }} weeks entered</span>{% endif %}
+    </div>
+    <div class="rpe-trend">
+      <div class="rpe-chart" role="list" aria-label="Revenue per employee, last {{ rpe.bars|length }} months">
+        {% for b in rpe.bars %}
+        <div class="rpe-col{% if b.latest %} latest{% endif %}{% if b.partial %} partial{% endif %}{% if b.empty %} empty{% endif %}"
+             role="listitem" tabindex="0" aria-label="{{ b.tip }}">
+          <span class="rpe-tip" aria-hidden="true">{{ b.tip }}</span>
+          <span class="rpe-plot">
+            {% if b.latest %}<b class="rpe-lbl">{{ b.display }}</b>{% endif %}
+            <i class="rpe-bar" style="height:{{ b.pct }}%"></i>
+          </span>
+          <span class="rpe-x">{{ b.label }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <details class="rpe-table">
+        <summary>Show the numbers</summary>
+        <table class="list">
+          <thead><tr><th>Month</th><th>Revenue</th><th>Headcount</th><th>Per employee{{ ' / year' if rpe.annual }}</th></tr></thead>
+          <tbody>
+          {% for m in rpe.months|reverse %}
+          <tr><td>{{ m.label }} {{ m.year }}{% if m.partial %} <span class="note">({{ m.weeks_entered }}/{{ m.weeks_expected }} wks)</span>{% endif %}</td>
+            <td>{{ m.revenue_display if m.revenue is not none else '&mdash;'|safe }}</td>
+            <td>{{ '%g'|format(m.headcount) if m.headcount else '&mdash;'|safe }}</td>
+            <td>{{ m.value_display if m.value is not none else '&mdash;'|safe }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    </div>
+  </div>
+  <p class="note rpe-foot">{% if rpe.weekly %}A month counts as its average week of revenue &times; 4.33, so five-week months don&rsquo;t read high{% if rpe.bars|selectattr('partial')|list %} and hatched months, which are missing a week&rsquo;s entry, are estimated from the weeks entered{% endif %}. {% endif %}Each month uses the headcount in effect that month.</p>
+  {% endif %}
+</section>
+
 {#- One dialog per broken-down tile, rendered with the page (the data is a
     handful of rows) and opened by #bd-<slot>, so the reload after a save from
     inside it lands back in it. Every number is for the week the tile shows;

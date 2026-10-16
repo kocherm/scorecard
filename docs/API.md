@@ -1,6 +1,6 @@
 # Scorecard API reference
 
-Version 1.2 &middot; Base path `/api/v1` &middot; JSON over HTTPS
+Version 1.3 &middot; Base path `/api/v1` &middot; JSON over HTTPS
 
 The Scorecard API lets integrations read the scored company scorecard and write
 weekly numbers into it: an n8n flow copying figures from your accounting tool,
@@ -239,8 +239,8 @@ curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/scor
           "unit": null,
           "dri": "Jordan Lee",
           "target": "48",
-          "last_closed_week": {"state": "green", "value": 61.0},
-          "current_week": {"state": "green", "value": 51.0},
+          "last_closed_week": {"state": "green", "value": 61.0, "target": 48.0},
+          "current_week": {"state": "green", "value": 51.0, "target": 48.0},
           "red_streak": 0,
           "escalation_level": 0,
           "one_three_one_filed": false,
@@ -262,8 +262,9 @@ curl -H "Authorization: Bearer $TOKEN" https://scorecard.example.com/api/v1/scor
 |-------|-------------|
 | `entries_due_by`, `stale_after` | Deadlines for the last closed week, with timezone offset |
 | `metrics[].dri` | The owner's name; `"-"` when nobody owns it |
-| `metrics[].target` | This week's target, formatted for display; `"-"` when none |
+| `metrics[].target` | The last closed week's target, formatted for display (the target for `last_closed_week.value`); `"-"` when none, `"G"` for status metrics |
 | `metrics[].*_week.value` | The number, or `"R"`/`"Y"`/`"G"` for status metrics; `null` when empty |
+| `metrics[].*_week.target` | The target that week was scored against: its own quarter's, baseline in weeks 1-6 and stretch from 7, before any in-week pacing; `null` when none |
 | `metrics[].escalation_level` | `0` none, `1` file a 1-3-1, `2` a 15-minute 1:1, `3` a structural conversation |
 | `metrics[].trend` | States of the last four closed weeks, oldest first |
 | `pending` / `stale` | Metrics missing last closed week's number, before / after the deadline, with the owner's Slack member id when known |
@@ -842,6 +843,16 @@ connector's token instead of the person reporting the number.
   **Admin > API tokens**.
 
 ## Changelog
+
+**1.3.0** (October 2026)
+
+- `GET /scorecard`: `metrics[].target` is now the target of the last closed
+  week - the week whose value, colour and red streak the response reports.
+  It used to be the current week's, which at a quarter start is next
+  quarter's target and from quarter-week 7 the stretch target, beside a value
+  that was judged on something else.
+- `last_closed_week` and `current_week` each gain `target`: the number that
+  week was scored against (unpaced), or `null`.
 
 **1.2.0** (September 2026)
 

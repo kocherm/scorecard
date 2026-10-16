@@ -132,6 +132,13 @@ def score_status(status: str) -> CellState:
     return {"G": CellState.GREEN, "Y": CellState.YELLOW, "R": CellState.RED}[status]
 
 
+def entry_fits(metric: MetricInfo, entry: EntryInfo) -> bool:
+    """Does this entry carry the kind of value this metric's type scores?"""
+    if metric.metric_type == "status":
+        return entry.value_status in ("G", "Y", "R")
+    return entry.value_numeric is not None
+
+
 def cell_state(metric: MetricInfo, week: date, entry: Optional[EntryInfo],
                target: Optional[float], now: datetime,
                tz: ZoneInfo = wk.BUSINESS_TZ) -> CellState:
@@ -140,6 +147,12 @@ def cell_state(metric: MetricInfo, week: date, entry: Optional[EntryInfo],
         return CellState.NA
     if metric.archived_week is not None and week >= metric.archived_week:
         return CellState.NA
+    if entry is not None and not entry_fits(metric, entry):
+        # A row written under another metric_type (a numeric value on a status
+        # metric, or the reverse) is not a number this metric can score. It
+        # reads as "no data" - still editable, still due - rather than raising
+        # and taking the whole board, TV, API and sweeps down with one row.
+        entry = None
     if entry is None:
         return CellState.STALE if now >= wk.stale_at(week, tz) else CellState.PENDING
     if metric.metric_type == "status":

@@ -71,6 +71,9 @@ class CellOut(BaseModel):
     state: Optional[str] = Field(None, description="green, yellow, red, stale, pending, "
                                  "no-target, or na (before the metric started)")
     value: Union[float, str, None] = Field(None, description="The number, or R/Y/G for status metrics")
+    target: Optional[float] = Field(None, description="The target THIS week was scored "
+                                    "against (its own quarter; baseline weeks 1-6, stretch "
+                                    "from 7), unpaced; null when none or not numeric")
 
 
 class MetricStateOut(BaseModel):
@@ -79,7 +82,8 @@ class MetricStateOut(BaseModel):
     type: Literal["numeric", "binary", "status"]
     unit: Optional[str] = Field(None, examples=["$"])
     dri: str = Field(description="Owner's display name, '-' when unowned")
-    target: str = Field(description="This week's target, formatted; '-' when none")
+    target: str = Field(description="The last closed week's target, formatted (the "
+                        "target for last_closed_week.value); '-' when none, 'G' for status")
     last_closed_week: CellOut
     current_week: CellOut
     red_streak: int = Field(description="Consecutive closed weeks in red")
@@ -200,10 +204,6 @@ def _errors(*codes: int) -> dict:
     return {c: {"model": Error, "description": text[c]} for c in codes}
 
 
-def _read_token(request: Request, con: sqlite3.Connection = Depends(db_dep)):
-    return api_token_from_request(request, con, need_write=False)
-
-
 def _slack_ids(con: sqlite3.Connection) -> dict[int, Optional[str]]:
     """user_id -> Slack member id, for the stale/red lists. Lets a caller that
     can post to Slack (the MCP server, an automation) address the DRI directly
@@ -240,14 +240,20 @@ def build_scorecard(con: sqlite3.Connection, now: datetime) -> dict:
                 "type": r.metric_type,
                 "unit": r.unit,
                 "dri": r.dri_name,
+                # The last closed week's target - the week red_streak, the
+                # stale list and the alerts are about. Each week also carries
+                # its own target, since the two differ at a quarter start and
+                # at quarter-week 7 (baseline -> stretch).
                 "target": r.target_display,
                 "last_closed_week": {
                     "state": closed_cell.state.value if closed_cell else None,
                     "value": closed_cell.raw if closed_cell else None,
+                    "target": closed_cell.target if closed_cell else None,
                 },
                 "current_week": {
                     "state": cur_cell.state.value if cur_cell else None,
                     "value": cur_cell.raw if cur_cell else None,
+                    "target": cur_cell.target if cur_cell else None,
                 },
                 "red_streak": r.red_streak,
                 "escalation_level": r.escalation,

@@ -12,6 +12,9 @@
   <button class="gf" data-gf="key" aria-pressed="false">&#9733; Key</button>
   <button class="gf" data-gf="missing" aria-pressed="false">Needs a number</button>
   <span class="gf-count" id="gf-count" hidden></span>
+  {# The whole window as rows, filters or not - the same weeks, sections and
+     colours as this board (GET /export.csv). #}
+  <a class="gf-export" href="/export.csv" download>Export CSV</a>
 </div>
 {% endmacro %}
 

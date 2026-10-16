@@ -19,8 +19,8 @@ credentials but no custom header:
     clients that let you set headers.
   - POST /mcp/t/{token}            same token in the path, for clients that
     only accept a URL. The token lands in the reverse proxy's access log, so
-    use a read-scoped token here and rotate it on the Admin > API tokens page
-    if the URL ever leaks.
+    only a READ-scoped token is accepted here (anything else gets 401); rotate
+    it on the Admin > API tokens page if the URL ever leaks.
 """
 from __future__ import annotations
 
@@ -224,9 +224,16 @@ async def mcp_endpoint(request: Request):
 async def mcp_endpoint_path_token(token: str, request: Request):
     """Same endpoint for connector UIs that accept only a URL. The path token
     is the credential here; any Authorization header is ignored rather than
-    merged, so there is never a question of which one won."""
+    merged, so there is never a question of which one won.
+
+    READ scope only: a URL ends up in proxy logs, browser history and
+    connector settings screens, so a token that can write must never work
+    here. Refused with the same 401 as an unknown token - this form does not
+    confirm that a write token exists."""
     with dbm.get_db() as con:
-        api_token_from_value(con, token, need_write=False)
+        row = api_token_from_value(con, token, need_write=False)
+        if row["scope"] != "read":
+            raise HTTPException(status_code=401, detail="Invalid token")
         return await _handle(request, con)
 
 

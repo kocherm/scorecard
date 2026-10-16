@@ -230,7 +230,11 @@ def test_week_two_and_three_reds_reach_the_channel_in_one_reply(env, slack):
     body = new[0]["text"]
     assert "Metric 1" in body and "Metric 5" in body
     assert "Metric 2" not in body, "the week-1 red stayed private"
-    assert len(_dms(slack)) == 3, "all three DRIs still hear about it privately"
+    # Dana owns two of the three reds: one DM per PERSON, never per metric.
+    assert [d["channel"] for d in _dms(slack)] == ["U2", "U3"], \
+        "both DRIs still hear about it privately, one message each"
+    assert "Metric 1" in _dms(slack)[0]["text"]
+    assert "Metric 2" in _dms(slack)[0]["text"]
 
 
 def test_escalations_thread_under_that_mornings_summary(env, slack):

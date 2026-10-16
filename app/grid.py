@@ -6,6 +6,7 @@ import math
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import partial
 from typing import Optional
 
 from . import scoring as sc
@@ -20,6 +21,11 @@ class Cell:
     raw: Optional[float | str]
     is_current: bool
     editable: bool        # current or past week, metric live
+    # The week's OWN quarter target and, for the in-progress week, the pace
+    # fraction it was scored on - so the cell hint (app/hints.py) and the CSV
+    # export state exactly what cell_state compared against.
+    target: Optional[float] = None
+    pace: Optional[float] = None
 
 
 @dataclass
@@ -116,6 +122,40 @@ def _metric_info(m: sqlite3.Row) -> sc.MetricInfo:
     )
 
 
+# The edit-grid window, in calendar months; Admin > Settings offers exactly
+# these. One month is not among them: before that month's first Monday it
+# holds no weeks at all.
+DISPLAY_MONTHS = (2, 3, 4)
+
+
+def clamp_display_months(n: int) -> int:
+    return max(DISPLAY_MONTHS[0], min(DISPLAY_MONTHS[-1], n))
+
+
+def _target_display(metric_type: str, unit: Optional[str], target: Optional[float]) -> str:
+    if target is not None:
+        return fmt_value("numeric", unit, target)
+    return "G" if metric_type == "status" else "-"
+
+
+def closed_states_desc(info: sc.MetricInfo, last_closed: date, entry_at, target_at,
+                       now: datetime, tz=wk.BUSINESS_TZ, n: int = 8) -> list[sc.CellState]:
+    """States of the last `n` closed weeks, newest first, stopping at the
+    metric's start - the input to the red streak.
+
+    `target_at(week)` must return THAT week's target, from its own quarter:
+    a streak that walks back across a quarter boundary judges each week by the
+    target it was set, not by this quarter's. The board and /m/{id} both call
+    this, so the two can never count a different streak."""
+    out = []
+    for i in range(n):
+        w = last_closed - timedelta(days=7 * i)
+        if w < info.start_week:
+            break
+        out.append(sc.cell_state(info, w, entry_at(w), target_at(w), now, tz))
+    return out
+
+
 def build_grid(con: sqlite3.Connection, now: datetime,
                include_archived: bool = False, hidden: bool = False) -> GridVM:
     """`hidden=True` builds the HIDDEN sections instead of the visible ones -
@@ -125,12 +165,13 @@ def build_grid(con: sqlite3.Connection, now: datetime,
     today = now.astimezone(tz).date()
     from .db import get_setting
     try:
-        months = max(1, min(4, int(get_setting(con, "display_months", "2"))))
+        months = clamp_display_months(int(get_setting(con, "display_months", "2")))
     except (TypeError, ValueError):
         months = 2
-    weeks = wk.window_weeks(today, months=months)
-    bands = wk.month_bands(weeks)
     cur_week = wk.monday_of(today)
+    # Never an empty window: everything below indexes weeks[0].
+    weeks = wk.window_weeks(today, months=months) or [cur_week]
+    bands = wk.month_bands(weeks)
     week_keys = [w.isoformat() for w in weeks]
 
     sections = con.execute(
@@ -192,6 +233,8 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                     display=fmt_value(m["metric_type"], m["unit"], raw),
                     raw=raw, is_current=(w == cur_week),
                     editable=(state != sc.CellState.NA),
+                    target=target_for(m["id"], w),
+                    pace=(sc.pace_fraction(w, now, tz) if w == cur_week else None),
                 ))
             band_subs = []
             for b in bands:
@@ -203,13 +246,9 @@ def build_grid(con: sqlite3.Connection, now: datetime,
 
             # Streak over closed weeks, newest first, back 8 weeks.
             closed = wk.last_closed_week(now, tz)
-            states_desc = []
-            for i in range(8):
-                w = closed - timedelta(days=7 * i)
-                if w < info.start_week:
-                    break
-                states_desc.append(sc.cell_state(info, w, entry_info(m["id"], w),
-                                                 target_for(m["id"], w), now, tz))
+            states_desc = closed_states_desc(
+                info, closed, partial(entry_info, m["id"]), partial(target_for, m["id"]),
+                now, tz)
             streak = sc.consecutive_red_weeks(states_desc)
 
             spark = []
@@ -230,7 +269,11 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                     pct = int(max(0.15, min(1.0, ratio)) * 100)
                 spark.append({"state": st.value, "value": val, "pct": pct})
 
-            cur_target = target_for(m["id"], cur_week)
+            # The target printed beside actual_display (the closed week's
+            # value) is the CLOSED week's: at a quarter start the current week
+            # is already next quarter's, and at quarter-week 7 it is stretch
+            # while the number beside it was judged on baseline.
+            closed_target = target_for(m["id"], closed)
             closed_entry = entry_info(m["id"], closed)
             actual_raw = None
             if closed_entry:
@@ -264,9 +307,8 @@ def build_grid(con: sqlite3.Connection, now: datetime,
                 rollup=m["rollup"], direction=m["direction"], unit=m["unit"],
                 dri_name=m["dri_name"] or "-", dri_user_id=m["dri_user_id"],
                 cells=cells, band_subtotals=band_subs,
-                target_display=(fmt_value("numeric", m["unit"], cur_target)
-                                if cur_target is not None else
-                                ("G" if m["metric_type"] == "status" else "-")),
+                target_display=_target_display(m["metric_type"], m["unit"],
+                                               closed_target),
                 actual_display=fmt_value(m["metric_type"], m["unit"], actual_raw) or "-",
                 spark=spark, red_streak=streak,
                 escalation=sc.escalation_level(streak), has_131=has_131,
@@ -313,8 +355,9 @@ class BoardRow:
     spark: list           # last 4 closed weeks: {state, value, pct}
     red_streak: int
     section: str
-    # The number behind latest_display and the current-week target behind
-    # target_display, for views that derive (a ratio, a share of target).
+    # The number behind latest_display and the target behind target_display -
+    # the target of the SAME week as that number - for views that derive (a
+    # ratio, a share of target).
     # None when the metric is not numeric or nothing is entered.
     latest_raw: Optional[float] = None
     target_raw: Optional[float] = None
@@ -530,14 +573,9 @@ def build_actions(con: sqlite3.Connection, vm: GridVM) -> list[ActionItem]:
 
     Reds first, then stales, each alphabetical: an order that does not depend on
     the clock, so a card cannot move between two polls of the same board."""
+    # Every card - red or stale - is about the last closed week, so every card
+    # carries that week's target (Row.target_display), never the current one.
     actions: list[ActionItem] = []
-    closed_targets: dict[int, Optional[float]] = {}
-    for t in con.execute("SELECT metric_id, year, quarter, baseline_value, "
-                         "stretch_value FROM targets"):
-        if (t["year"], t["quarter"]) == wk.quarter_of(vm.last_closed):
-            closed_targets[t["metric_id"]] = sc.target_for_week(
-                vm.last_closed, sc.QuarterTargets(t["baseline_value"],
-                                                  t["stretch_value"]))
     for section in vm.sections:
         for row in section.rows:
             closed = next((c for c in row.cells if c.week == vm.last_closed), None)
@@ -546,14 +584,11 @@ def build_actions(con: sqlite3.Connection, vm: GridVM) -> list[ActionItem]:
                 step = NEXT_STEP[lvl]
                 if lvl == 1 and row.has_131:
                     step = "1-3-1 filed - review in sync"
-                ct = closed_targets.get(row.metric_id)
-                ct_display = (fmt_value("numeric", row.unit, ct) if ct is not None
-                              else ("G" if row.metric_type == "status" else "-"))
                 actions.append(ActionItem(
                     kind="red", badge=f"RED WK {row.red_streak}",
                     metric_id=row.metric_id, name=row.name,
                     value_display=(closed.display if closed and closed.display else "R"),
-                    target_display=ct_display,
+                    target_display=row.target_display,
                     dri_name=row.dri_name, initials=_initials(row.dri_name),
                     has_131=row.has_131,
                     week=vm.last_closed.isoformat(),
@@ -578,7 +613,6 @@ def _board_rows(con: sqlite3.Connection, vm: GridVM) -> list[BoardRow]:
     def find_cell(row: Row, week: date) -> Optional[Cell]:
         return next((c for c in row.cells if c.week == week), None)
 
-    targets_by_metric = _current_targets(con, vm)
     rows: list[BoardRow] = []
     for section in vm.sections:
         for row in section.rows:
@@ -589,6 +623,11 @@ def _board_rows(con: sqlite3.Connection, vm: GridVM) -> list[BoardRow]:
             if cur is None or cur.raw is None:
                 use, wnote = (closed, "last week")
             latest_raw = use.raw if use and use.raw is not None else None
+            # The target is the shown week's own (Cell.target): last week's
+            # number beside this week's target pairs a Q3 value with a Q4
+            # target at a quarter start, and a baseline-judged week 6 with the
+            # stretch target in week 7 - and the CEO ring is drawn from it.
+            use_target = use.target if use else None
             rows.append(BoardRow(
                 metric_id=row.metric_id, name=row.name,
                 metric_type=row.metric_type, is_key=row.is_key,
@@ -602,14 +641,13 @@ def _board_rows(con: sqlite3.Connection, vm: GridVM) -> list[BoardRow]:
                                else "pending")),
                 week_note=(wnote if latest_raw is not None else ""),
                 cur_state=(cur.state.value if cur else "pending"),
-                target_display=row.target_display,
+                target_display=_target_display(row.metric_type, row.unit, use_target),
                 spark=row.spark, red_streak=row.red_streak,
                 section=section.name,
                 latest_raw=(float(latest_raw)
                             if row.metric_type == "numeric"
                             and isinstance(latest_raw, (int, float)) else None),
-                target_raw=(targets_by_metric.get(row.metric_id)
-                            if row.metric_type == "numeric" else None),
+                target_raw=(use_target if row.metric_type == "numeric" else None),
                 direction=row.direction, unit=row.unit))
     return rows
 
@@ -905,6 +943,155 @@ def build_ceo(con: sqlite3.Connection, rows: list[BoardRow]) -> CeoVM:
                  bars=bars, bars_note=bars_note)
 
 
+# ------------------------------------------- revenue per employee, monthly
+RPE_MONTHS = 12   # months in the trend
+WEEKS_PER_MONTH = 52 / 12
+
+
+@dataclass
+class RpeMonth:
+    year: int
+    month: int
+    label: str                 # "Sep"
+    long_label: str            # "September 2026"
+    revenue: Optional[float]   # the month's revenue, by the metric's rollup
+    headcount: Optional[float]
+    value: Optional[float]     # revenue / headcount, per MONTH
+    weeks_entered: int
+    weeks_expected: int
+    partial: bool              # a summed month with weeks missing (scaled up)
+    revenue_display: str = "-"
+    value_display: str = "-"   # per employee, annualized when the view is
+
+
+@dataclass
+class RpeVM:
+    annual: bool               # display x12; the months always hold monthly values
+    months: list               # RpeMonth, oldest first, the trend window
+    latest: Optional[RpeMonth]  # newest closed month with a value
+    unit: Optional[str]
+    has_revenue: bool          # the Revenue slot is mapped
+    weekly: bool               # revenue is a weekly sum, normalised per month
+    has_headcount: bool
+    value_display: str
+    revenue_display: str
+    headcount_display: str
+    mom: Optional[float]       # % change on the month before
+    yoy: Optional[float]       # % change on the same month a year earlier
+    bars: list                 # {label, display, pct, partial, latest, tip}
+
+
+def _pct_change(new: Optional[float], old: Optional[float]) -> Optional[float]:
+    if new is None or old is None or old <= 0:
+        return None
+    return (new - old) / old * 100
+
+
+def build_rpe(con: sqlite3.Connection, ceo: CeoVM, now: datetime,
+              annual: bool = False) -> RpeVM:
+    """Revenue per employee, one number per CLOSED month: the Revenue tile's
+    metric over the weeks whose Monday falls in the month, divided by the
+    headcount in effect that month (ceo.headcount_for). A weekly-summed
+    metric counts as its average week x 52/12, so four- and five-Monday
+    months compare fairly; a point-in-time MRR is averaged as it stands.
+    The month in progress is left out.
+
+    A summed month with weeks missing is scaled from the weeks entered and
+    marked partial, so nobody mistakes an estimate for a total. Annualized
+    is the monthly figure x 12 - a run rate, said as one - applied at
+    display only, so both views are the same data."""
+    from . import ceo as ceom
+    fx = 12 if annual else 1
+    row = ceo.tiles["revenue"].row
+    hist = ceom.headcount_history(con)
+    last = wk.last_closed_month(now)
+    # One month further back than the window, for the year-on-year change.
+    span = wk.months_ending(last, RPE_MONTHS + 1)
+    months: list[RpeMonth] = []
+    unit = row.unit if row else "$"
+    m = (con.execute("SELECT rollup, start_week FROM metrics WHERE id = ?",
+                     (row.metric_id,)).fetchone() if row else None)
+    vals: dict[str, float] = {}
+    if m:
+        first = wk.mondays_in_month(*span[0])[0].isoformat()
+        vals = {e["week_start"]: e["value_numeric"] for e in con.execute(
+            """SELECT week_start, value_numeric FROM entries
+               WHERE metric_id = ? AND week_start >= ? AND value_numeric IS NOT NULL""",
+            (row.metric_id, first))}
+    for ym in span:
+        mondays = wk.mondays_in_month(*ym)
+        expected = [d for d in mondays
+                    if m is None or d.isoformat() >= m["start_week"]]
+        got = [sc.EntryInfo(vals[d.isoformat()], None)
+               for d in mondays if d.isoformat() in vals]
+        # A summed metric is normalised to the AVERAGE week x 52/12. Months
+        # are the Mondays in them, so some hold five weeks and some four,
+        # and a plain sum swings 25% on the calendar alone; averaging also
+        # keeps a month with a week missing from reading as a slump.
+        # A point-in-time metric (MRR) is already a monthly figure.
+        revenue = None
+        if m and got:
+            mean = sc.month_subtotal("numeric", "average", got)
+            revenue = (mean if m["rollup"] == "average"
+                       else mean * WEEKS_PER_MONTH)
+        hc = ceom.headcount_for(hist, ym)
+        months.append(RpeMonth(
+            year=ym[0], month=ym[1], label=date(*ym, 1).strftime("%b"),
+            long_label=date(*ym, 1).strftime("%B %Y"),
+            revenue=revenue, headcount=hc,
+            value=(revenue / hc if revenue is not None and hc else None),
+            weeks_entered=len(got), weeks_expected=len(expected),
+            partial=bool(m and m["rollup"] != "average" and got
+                         and len(got) < len(expected))))
+
+    def money(v: Optional[float]) -> str:
+        return fmt_value("numeric", unit, round(v)) if v is not None else "-"
+
+    for x in months:
+        x.revenue_display = money(x.revenue)
+        x.value_display = money(x.value * fx) if x.value is not None else "-"
+
+    by_ym = {(x.year, x.month): x for x in months}
+    window = months[1:]
+    latest = next((x for x in reversed(window) if x.value is not None), None)
+    mom = yoy = None
+    if latest:
+        ym = (latest.year, latest.month)
+        prev = by_ym.get(wk.month_shift(ym, -1))
+        ago = by_ym.get(wk.month_shift(ym, -12))
+        mom = _pct_change(latest.value, prev.value if prev else None)
+        yoy = _pct_change(latest.value, ago.value if ago else None)
+
+    top = max((x.value for x in window if x.value is not None), default=0) or 1.0
+    bars = []
+    for x in window:
+        if x.value is None:
+            why = ("no revenue entered" if x.revenue is None else "no headcount")
+            bars.append({"label": x.label, "display": "", "pct": 0, "partial": False,
+                         "latest": False, "empty": True,
+                         "tip": f"{x.long_label}: {why}"})
+            continue
+        tip = (f"{x.long_label}: {x.value_display} per employee"
+               f"{' per year' if annual else ''} - {money(x.revenue)} revenue"
+               f" / {x.headcount:g} {'employee' if x.headcount == 1 else 'employees'}"
+               f"{' x 12' if annual else ''}")
+        if x.partial:
+            tip += f" (from {x.weeks_entered} of {x.weeks_expected} weeks)"
+        bars.append({"label": x.label, "display": x.value_display,
+                     "pct": round(max(2.0, x.value / top * 100), 1),
+                     "partial": x.partial, "latest": x is latest, "empty": False,
+                     "tip": tip})
+
+    return RpeVM(
+        annual=annual, months=window, latest=latest, unit=unit,
+        has_revenue=row is not None, has_headcount=bool(hist),
+        weekly=bool(m and m["rollup"] != "average"),
+        value_display=latest.value_display if latest else "-",
+        revenue_display=latest.revenue_display if latest else "-",
+        headcount_display=f"{latest.headcount:g}" if latest else "-",
+        mom=mom, yoy=yoy, bars=bars)
+
+
 # ---------------------------------------------------- one metric, in full
 @dataclass
 class MetricPoint:
@@ -1021,13 +1208,16 @@ def build_metric(con: sqlite3.Connection, metric_id: int, now: datetime,
                             ("G" if m["metric_type"] == "status" else "-")),
             editable=(state != sc.CellState.NA), is_current=(w == cur_week)))
 
-    states_desc = []
-    for i in range(8):
-        w = last_closed - timedelta(days=7 * i)
-        if w < info.start_week:
-            break
-        states_desc.append(sc.cell_state(info, w, entries.get(w.isoformat()),
-                                         sc.target_for_week(w, qt), now, tz))
+    # The streak walks back from the last closed week, possibly into an
+    # earlier quarter than the one on the page: each week is judged by its OWN
+    # quarter's target, exactly as the board does (closed_states_desc).
+    all_targets = {
+        (r["year"], r["quarter"]): sc.QuarterTargets(r["baseline_value"], r["stretch_value"])
+        for r in con.execute("SELECT year, quarter, baseline_value, stretch_value "
+                             "FROM targets WHERE metric_id = ?", (metric_id,))}
+    states_desc = closed_states_desc(
+        info, last_closed, lambda w: entries.get(w.isoformat()),
+        lambda w: sc.target_for_week(w, all_targets.get(wk.quarter_of(w))), now, tz)
     streak = sc.consecutive_red_weeks(states_desc)
 
     total = sc.month_subtotal(m["metric_type"], m["rollup"], values)
@@ -1109,11 +1299,14 @@ def build_target_rows(con: sqlite3.Connection, year: int, quarter: int,
 
         vals, hit, scored = [], 0, 0
         for pw in prev_weeks:
+            # Closed weeks only, for the mean as for the hit rate: planning
+            # next quarter while this one runs, the in-progress week holds a
+            # partial count and would drag the mean (and "Match") down.
+            if pw > last_closed:
+                continue
             ei = entries.get(pw.isoformat())
             if ei is not None and ei.value_numeric is not None:
                 vals.append(ei.value_numeric)
-            if pw > last_closed:
-                continue
             target = sc.target_for_week(pw, pqt)
             if ei is None or ei.value_numeric is None or target is None:
                 continue

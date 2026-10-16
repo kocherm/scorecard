@@ -104,6 +104,51 @@ def create_metric(con: sqlite3.Connection, section_id: int, name: str,
     return cur.lastrowid
 
 
+def type_change_refused(con: sqlite3.Connection, metric_id: int,
+                        old_type: str, new_type: str) -> Optional[str]:
+    """Why a metric's type cannot change, or None when it can.
+
+    The numbers already written belong to the old type: a status metric's
+    entries hold R/Y/G and no number, a numeric one's hold a number and no
+    letter, so after the switch every one of them is unscoreable. The API's
+    PATCH does not accept a type at all for this reason; the admin form may
+    still fix a type picked by mistake, but only before anything is entered."""
+    if old_type == new_type:
+        return None
+    if con.execute("SELECT 1 FROM entries WHERE metric_id = ? LIMIT 1",
+                   (metric_id,)).fetchone():
+        return ("The type cannot change once numbers are entered - they would "
+                "stop meaning anything. Archive this metric and add a new one.")
+    return None
+
+
+def update_metric(con: sqlite3.Connection, metric_id: int, *, section_id: int,
+                  name: str, metric_type: str, rollup: Optional[str], direction: str,
+                  unit: Optional[str], dri_user_id: Optional[int], start_week: date,
+                  sort_order: int, is_key: bool) -> None:
+    """The admin edit form's write. Raises Conflict for a type change on a
+    metric with entries, or a second live row with this name in the section;
+    ValueError for an empty name."""
+    m = con.execute("SELECT metric_type, archived_at FROM metrics WHERE id = ?",
+                    (metric_id,)).fetchone()
+    why = type_change_refused(con, metric_id, m["metric_type"], metric_type)
+    if why:
+        raise Conflict(why)
+    name = clean_name(name)
+    if not name:
+        raise ValueError("A metric needs a name")
+    if m["archived_at"] is None and name_taken(con, section_id, name, metric_id):
+        raise Conflict(f"{name} already exists in this section")
+    con.execute(
+        """UPDATE metrics SET section_id=?, name=?, metric_type=?, rollup=?, direction=?,
+                              unit=?, dri_user_id=?, start_week=?, sort_order=?, is_key=?
+           WHERE id=?""",
+        (section_id, name, metric_type,
+         (rollup or "sum") if metric_type == "numeric" else None,
+         direction, unit or None, dri_user_id, start_week.isoformat(), sort_order,
+         1 if is_key else 0, metric_id))
+
+
 def save_target(con: sqlite3.Connection, metric_id: int, year: int, quarter: int,
                 baseline: float, stretch: float) -> bool:
     """Upsert one quarter's target PAIR. Returns False when it was already

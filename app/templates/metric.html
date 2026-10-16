@@ -70,6 +70,8 @@
       </select>
       <input type="number" name="year" value="{{ m.year }}" aria-label="Year">
       <button class="btn secondary sm" type="submit">View</button>
+      <a class="btn secondary sm" href="/m/{{ m.metric_id }}.csv" download
+         title="Every week since this metric started, as CSV">Export CSV</a>
     </form>
   </div>
 

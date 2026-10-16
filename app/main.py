@@ -1,15 +1,18 @@
 """Aprendio Scorecard - FastAPI app: TV display, edit grid, admin, API, scheduler."""
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import logging
 import mimetypes
+import re
 import secrets
 import sqlite3
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time as dt_time, timedelta, timezone
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 from functools import partial, wraps
 from pathlib import Path
 from typing import Optional
@@ -19,16 +22,20 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import (BackgroundTasks, Body, Depends, FastAPI, Form,
                      HTTPException, Request, Response)
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               RedirectResponse)
+                               PlainTextResponse, RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import Headers
 
 from migrate import add_admin_scope, channel_rollup, oto_revisions, slack_two_way
 from migrate import passkeys as passkeys_migration
 from migrate import token_cleared
+from migrate import sweep_error
+from migrate import session_scope
 
 from . import (admin_ops, alerts, ceo as ceom, channels, db as dbm, demo, entry_ops,
                grid as gridm, passkeys, readiness, weeks as wk)
+from . import export as exportm, hints
 from .api import router as api_router
 from .api_docs import router as api_docs_router
 from .mcp import router as mcp_router
@@ -36,12 +43,13 @@ from .inbound import router as inbound_router
 from .slack import router as slack_router
 from .auth import (RESET_LINK_HOURS, ROTATE_GRACE_DAYS, ROTATE_GRACE_MAX,
                    SESSION_COOKIE, complete_password_reset, consume_magic_link,
-                   create_magic_link, create_reset_link,
+                   create_reset_link,
                    create_session, destroy_session, hash_password, new_api_token,
                    rotate_api_token,
                    require_admin, require_editor, require_self, require_viewer,
                    session_hash, user_from_request, verify_password)
 from .db import db_dep
+from .auth import CHECKIN_SCOPE, full_login_required, is_limited, session_ttl
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("scorecard")
@@ -56,23 +64,44 @@ templates.env.filters["initials"] = gridm._initials
 # A number the way it must appear inside an <input type=number>: no $,
 # no thousands separators, and no 5.0 where a person typed 5.
 templates.env.filters["plain"] = gridm.plain_value
+# "Why is this red?" - the title/aria-label sentence on each board cell.
+templates.env.globals["cell_hint"] = hints.cell_hint
+templates.env.filters["month_label"] = lambda k: datetime.strptime(k, "%Y-%m").strftime("%b %Y")
 # Cache-buster: changes whenever any hand-written static asset does, so a
 # browser never serves a stale scorecard.css or passkey.js after a deploy.
 templates.env.globals["static_v"] = str(int(max(
     (BASE / "static" / f).stat().st_mtime
     for f in ("scorecard.css", "passkey.js"))))
 
-scheduler = BackgroundScheduler()
+# The default misfire grace is ONE SECOND: a scheduler that is up but late
+# (a long GC, a laptop asleep, the pool busy) silently drops that week's
+# Tuesday sweeps. Four hours keeps a late run useful the same morning, and
+# coalesce folds a backlog into one run. A restart is a different case -
+# a fresh job's next run is computed from boot, so nothing missed is ever
+# replayed - and alerts.catch_up_sweeps covers it at startup.
+scheduler = BackgroundScheduler(job_defaults={"misfire_grace_time": 4 * 3600,
+                                              "coalesce": True})
+
+
+def _add_column(con: sqlite3.Connection, ddl: str) -> None:
+    """One additive `ALTER TABLE ... ADD COLUMN`, safe to replay on every boot.
+    Only "duplicate column name" means already migrated. Anything else -
+    "database is locked" from a backup or a second process, a typo - must stop
+    the boot: swallowing it starts the app on a schema missing the column, and
+    the first query that names it fails far from the cause."""
+    try:
+        con.execute(ddl)
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with dbm.get_db() as con:
         dbm.init_db(con)
-        try:  # migration for DBs created before the is_key column existed
-            con.execute("ALTER TABLE metrics ADD COLUMN is_key INTEGER NOT NULL DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass
+        # migration for DBs created before the is_key column existed
+        _add_column(con, "ALTER TABLE metrics ADD COLUMN is_key INTEGER NOT NULL DEFAULT 0")
         # migration for DBs created before api_tokens.scope allowed 'admin'
         if add_admin_scope.needs_migration(con):
             add_admin_scope.migrate(con)
@@ -86,10 +115,7 @@ async def lifespan(app: FastAPI):
                     "ALTER TABLE api_tokens ADD COLUMN expires_at TEXT",
                     "ALTER TABLE api_tokens ADD COLUMN "
                     "rotated_from_id INTEGER REFERENCES api_tokens(id)"):
-            try:
-                con.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
+            _add_column(con, ddl)
         # migrations for DBs created before two-way Slack existed
         if slack_two_way.needs_entries_migration(con):
             slack_two_way.migrate_entries(con)
@@ -102,6 +128,9 @@ async def lifespan(app: FastAPI):
         if channel_rollup.needs_migration(con):
             channel_rollup.migrate(con)
             log.info("Migrated sweep_runs.kind to allow the summary sweep")
+        if sweep_error.needs_migration(con):
+            sweep_error.migrate(con)
+            log.info("Migrated sweep_runs.outcome to allow 'error'")
         if oto_revisions.needs_migration(con):
             oto_revisions.migrate(con)
             log.info("Migrated one_three_ones to allow revisions")
@@ -112,31 +141,48 @@ async def lifespan(app: FastAPI):
             log.info("Migration: %s", line)
         for line in token_cleared.migrate(con):
             log.info("Migration: %s", line)
+        # sessions.scope: check-in links sign in with a LIMITED session
+        for line in session_scope.migrate(con):
+            log.info("Migration: %s", line)
         if dbm.get_setting(con, "display_token") is None:
             dbm.set_setting(con, "display_token", secrets.token_urlsafe(24))
     # #scorecard's whole week: the Tuesday summary of the closed week, then the
     # escalations that thread under it, then Wednesday's chase for what is
     # still blank. Two top-level posts, everything else in their threads.
-    scheduler.add_job(alerts.summary_sweep, CronTrigger(
+    # Every sweep goes through alerts.guarded: one at a time, and a crash is
+    # recorded in sweep_runs (outcome 'error') on its own connection instead
+    # of vanishing with the sweep's rolled-back transaction.
+    # These times must match alerts.SCHEDULE, which the boot catch-up reads.
+    scheduler.add_job(alerts.guarded("summary", alerts.summary_sweep), CronTrigger(
         day_of_week="tue", hour=8, minute=0, timezone="America/Chicago"),
         id="summary_sweep", replace_existing=True)
     # Five minutes after the summary, not alongside it: red_sweep replies into
     # that morning's thread, so the parent has to exist first. Concurrent cron
     # jobs on the same minute would race for it and lose the thread.
-    scheduler.add_job(alerts.red_sweep, CronTrigger(
+    scheduler.add_job(alerts.guarded("red", alerts.red_sweep), CronTrigger(
         day_of_week="tue", hour=8, minute=5, timezone="America/Chicago"),
         id="red_sweep", replace_existing=True)
-    scheduler.add_job(alerts.stale_sweep, CronTrigger(
+    scheduler.add_job(alerts.guarded("stale", alerts.stale_sweep), CronTrigger(
         day_of_week="wed", hour=8, minute=0, timezone="America/Chicago"),
         id="stale_sweep", replace_existing=True)
+    # Make up this week's summary/red/stale if a restart skipped their slot.
+    # Once, on the scheduler's thread rather than boot's (it may call Slack),
+    # and 30s out on purpose: a lifespan that ends sooner - a test client, a
+    # crash-looping container - shuts the scheduler down before it fires, so
+    # it never runs against a database that is already gone.
+    scheduler.add_job(alerts.catch_up_sweeps, "date",
+                      run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
+                      id="catch_up_sweeps", replace_existing=True)
     # Check-in nudge DMs. Always registered; enable/preset are checked inside
     # the job (same pattern as alerts_enabled) so settings changes need no
     # rescheduling. Monday 16:00 = "due tonight"; Tuesday 09:00 = last call
     # before the Wednesday 08:00 stale sweep.
-    scheduler.add_job(partial(alerts.nudge_sweep, "nudge1"), CronTrigger(
+    scheduler.add_job(alerts.guarded("nudge1", partial(alerts.nudge_sweep, "nudge1")),
+                      CronTrigger(
         day_of_week="mon", hour=16, minute=0, timezone="America/Chicago"),
         id="nudge1", replace_existing=True)
-    scheduler.add_job(partial(alerts.nudge_sweep, "nudge2"), CronTrigger(
+    scheduler.add_job(alerts.guarded("nudge2", partial(alerts.nudge_sweep, "nudge2")),
+                      CronTrigger(
         day_of_week="tue", hour=9, minute=0, timezone="America/Chicago"),
         id="nudge2", replace_existing=True)
 
@@ -170,6 +216,80 @@ app.include_router(api_docs_router)
 app.include_router(mcp_router)
 app.include_router(slack_router)
 app.include_router(inbound_router)
+
+
+# ---------------------------------------------------------------- CSRF guard
+# Machine endpoints authenticate with a bearer token or a request signature,
+# never the session cookie, so a cross-site form gains nothing there - and
+# their callers (Slack, Telegram, Twilio, MCP clients) are not browsers.
+_CSRF_EXEMPT_PREFIXES = ("/api/v1/", "/mcp/")
+_CSRF_EXEMPT_PATHS = {"/mcp", "/slack/events", "/telegram/webhook", "/twilio/webhook"}
+_CSRF_UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _cross_site(scope) -> bool:
+    """True when the BROWSER says this request came from another site.
+    Sec-Fetch-Site is authoritative when present; otherwise Origin must name
+    this host. A request carrying neither (curl, n8n, TestClient) passes: it
+    is not a browser, so it holds no victim's cookie to ride on."""
+    h = Headers(scope=scope)
+    site = h.get("sec-fetch-site")
+    if site is not None:
+        return site not in ("same-origin", "none")
+    origin = h.get("origin")
+    if origin is None:
+        return False
+    return urlsplit(origin).netloc.lower() != h.get("host", "").lower()
+
+
+class CrossSiteGuard:
+    """Refuse unsafe methods sent cross-site. SameSite=Lax already keeps the
+    session cookie off a cross-site POST in current browsers; this is the
+    belt to that, and it also covers same-SITE subdomains, which Lax does not."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] == "http" and scope["method"] in _CSRF_UNSAFE
+                and scope["path"] not in _CSRF_EXEMPT_PATHS
+                and not scope["path"].startswith(_CSRF_EXEMPT_PREFIXES)
+                and _cross_site(scope)):
+            await PlainTextResponse("Cross-site request refused.\n",
+                                    status_code=403)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(CrossSiteGuard)
+
+
+# ---------------------------------------------------------------- access log
+# Several URLs carry a credential: /checkin?t=, /reset?t=, /display?token=,
+# /display/body?token= and the MCP connector's /mcp/t/<token>. uvicorn's
+# access log would write each one to disk; keep the path, drop the secret.
+_LOG_SECRET_QUERY = re.compile(r"([?&](?:t|token)=)[^&#\s\"]*")
+_LOG_SECRET_PATH = re.compile(r"(/mcp/t/)[^/?#\s\"]+")
+
+
+def _redact_credentials(s: str) -> str:
+    return _LOG_SECRET_PATH.sub(r"\1[redacted]",
+                                _LOG_SECRET_QUERY.sub(r"\1[redacted]", s))
+
+
+class RedactCredentialsFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact_credentials(a) if isinstance(a, str) else a
+                                for a in record.args)
+        elif isinstance(record.msg, str):
+            record.msg = _redact_credentials(record.msg)
+        return True
+
+
+_access_log = logging.getLogger("uvicorn.access")
+if not any(type(f).__name__ == "RedactCredentialsFilter" for f in _access_log.filters):
+    _access_log.addFilter(RedactCredentialsFilter())
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -227,6 +347,30 @@ async def redirect_handler(request: Request, exc: HTTPException):
     return await http_exception_handler(request, exc)
 
 
+# ---------------------------------------------------------------- health check
+@app.get("/healthz")
+def healthz():
+    """Liveness for docker-compose and uptime monitors. Unauthenticated, so the
+    body is three fixed words and nothing else: no version, path, error text
+    or count. 503 only when the database cannot answer; a stopped scheduler is
+    reported (alerts have quietly died) but the app still serves the board.
+    Opens its own connection rather than Depends(db_dep), so a database that
+    will not open is a 503 here instead of a 500 from the dependency."""
+    db_ok = False
+    try:
+        con = dbm.connect()
+        try:
+            db_ok = con.execute("SELECT 1").fetchone()[0] == 1
+        finally:
+            con.close()
+    except Exception:
+        log.exception("healthz: database check failed")
+    return JSONResponse(
+        {"ok": db_ok, "db": "ok" if db_ok else "error",
+         "scheduler": "running" if scheduler.running else "stopped"},
+        status_code=200 if db_ok else 503)
+
+
 # ---------------------------------------------------------------- auth pages
 def _login_render(request: Request, con: sqlite3.Connection,
                   error: Optional[str]) -> HTMLResponse:
@@ -243,6 +387,9 @@ def login_page(request: Request, con: sqlite3.Connection = Depends(db_dep)):
 
 # Simple in-memory login throttle: 5 failures per identity per 15 minutes.
 _login_failures: dict[str, list[float]] = {}
+# Verified against when no account matches, so a wrong email costs the same
+# argon2 work as a wrong password. Random input: it can never match anything.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 _LOCKOUT_N, _LOCKOUT_WINDOW = 5, 900.0
 
 
@@ -288,7 +435,11 @@ def login(request: Request, email: str = Form(...), password: str = Form(...),
                              "Too many attempts. Wait 15 minutes and try again.")
     row = con.execute("SELECT * FROM users WHERE email = ? AND is_active = 1",
                       (email.strip(),)).fetchone()
-    if row is None or not verify_password(password, row["password_hash"]):
+    # No such account still pays for one argon2 verify, so the response time
+    # does not say whether the email exists.
+    ok = verify_password(password, row["password_hash"] if row is not None
+                         else _DUMMY_PASSWORD_HASH)
+    if row is None or not ok:
         _record_failure(key)
         return _login_render(request, con, "Wrong email or password.")
     _login_failures.pop(key, None)
@@ -558,8 +709,10 @@ def account_page(request: Request, user=Depends(require_viewer),
 
 @app.post("/account/password")
 def change_password(request: Request, current: str = Form(...), new: str = Form(...),
-                    user=Depends(require_viewer),
+                    user=Depends(require_self),
                     con: sqlite3.Connection = Depends(db_dep)):
+    # require_self: a password is a credential, so view-as must not set one
+    # for the account being viewed.
     if not verify_password(current, user["password_hash"]):
         return _account_render(request, con, user,
                                flash="Current password is wrong.", flash_kind="err")
@@ -569,6 +722,10 @@ def change_password(request: Request, current: str = Form(...), new: str = Form(
             flash=f"New password must be {PASSWORD_MIN}+ characters.")
     con.execute("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?",
                 (hash_password(new), user["id"]))
+    # Changing a password is how you lock out whoever else has it: sign out
+    # every OTHER session, keep this one.
+    con.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+                (user["id"], session_hash(request) or ""))
     return RedirectResponse("/", status_code=303)
 
 
@@ -587,19 +744,21 @@ def grid_page(request: Request, user=Depends(require_viewer),
 
 
 @app.get("/ceo", response_class=HTMLResponse)
-def ceo_page(request: Request, user=Depends(require_viewer),
+def ceo_page(request: Request, rpe: str = "month", user=Depends(require_viewer),
              con: sqlite3.Connection = Depends(data_db_dep),
              real: sqlite3.Connection = Depends(db_dep)):
     """The seven CEO numbers as a page of their own, for everyone who can see
     the board. Same CeoVM the TV view renders (grid.build_ceo over the board's
     BoardRows, plus hidden-section slots via grid.ceo_rows), so the page and
-    the screen on the wall cannot disagree."""
+    the screen on the wall cannot disagree. ?rpe=year shows revenue per
+    employee annualized; it is a link, not a setting, so it can be shared."""
     now = datetime.now(timezone.utc)
     vm = gridm.build_grid(con, now)
     rows = gridm.ceo_rows(con, now, gridm._board_rows(con, vm))
     ceo = gridm.build_ceo(con, rows)
     return render(request, "ceo.html", user=user, vm=vm, active="ceo",
                   ceo=ceo, breakdowns=gridm.build_breakdowns(con, ceo, rows, now),
+                  rpe=gridm.build_rpe(con, ceo, now, annual=(rpe == "year")),
                   breakdown_slots=ceom.BREAKDOWN_SLOTS,
                   can_edit=user["role"] in ("editor", "admin"),
                   demo_on=dbm.get_setting(real, "display_demo_data", "0") == "1",
@@ -878,10 +1037,13 @@ def checkin_page(request: Request, t: str = "", saved: str = "", week: str = "",
         if t:
             uid = consume_magic_link(real, t)
             if uid is not None:
-                token = create_session(real, uid)
+                # LIMITED session (auth.CHECKIN_SCOPE): enter numbers, file
+                # your 1-3-1s, read the board - for 12 hours. Never the owner's
+                # full role: an admin's nudge must not be an admin session.
+                token = create_session(real, uid, scope=CHECKIN_SCOPE)
                 resp = RedirectResponse("/checkin", status_code=303)  # clean URL
                 resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax",
-                                max_age=30 * 86400,
+                                max_age=int(session_ttl(CHECKIN_SCOPE).total_seconds()),
                                 secure=request.url.scheme == "https")
                 return resp
         return RedirectResponse("/login", status_code=303)
@@ -1011,7 +1173,9 @@ def checkin_catchup_save(request: Request, user=Depends(require_editor),
 
 
 # ------------------------------------------------------------- metric page
-@app.get("/m/{metric_id}", response_class=HTMLResponse)
+# :int so "/m/5.csv" falls through to metric_csv below instead of failing
+# validation here.
+@app.get("/m/{metric_id:int}", response_class=HTMLResponse)
 def metric_page(metric_id: int, request: Request, year: int = 0, quarter: int = 0,
                 user=Depends(require_viewer),
                 con: sqlite3.Connection = Depends(data_db_dep),
@@ -1049,12 +1213,51 @@ def metric_page(metric_id: int, request: Request, year: int = 0, quarter: int = 
                   demo_on=demo_on)
 
 
+# ---------------------------------------------------------------- CSV export
+def _csv_response(body: bytes, filename: str) -> Response:
+    return Response(body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"',
+                             "Cache-Control": "no-store"})
+
+
+@app.get("/export.csv")
+def board_csv(user=Depends(require_viewer),
+              con: sqlite3.Connection = Depends(data_db_dep)):
+    """The board's window as rows: what anyone who can see the board can see,
+    hidden sections left out exactly as the board leaves them out."""
+    vm = gridm.build_grid(con, datetime.now(timezone.utc))
+    name = f"scorecard-{vm.weeks[0].isoformat()}-to-{vm.weeks[-1].isoformat()}.csv"
+    return _csv_response(exportm.to_csv(exportm.BOARD_HEADER, exportm.board_rows(vm)),
+                         name)
+
+
+@app.get("/m/{metric_id:int}.csv")
+def metric_csv(metric_id: int, user=Depends(require_viewer),
+               con: sqlite3.Connection = Depends(data_db_dep)):
+    """One metric, every week since it started - readable by anyone who can
+    open its /m page."""
+    m = _metric_or_404(con, metric_id)
+    rows = exportm.history_rows(con, m, datetime.now(timezone.utc))
+    return _csv_response(exportm.to_csv(exportm.HISTORY_HEADER, rows),
+                         f"{exportm.filename_slug(m['name'])}-history.csv")
+
+
 # ---------------------------------------------------------------- 1-3-1
+def _link_session_owns(request: Request, con: sqlite3.Connection, user,
+                       m: sqlite3.Row) -> None:
+    """A check-in-link session may file a 1-3-1 only for a metric it owns -
+    the same DRI rule /checkin applies. auth's allowlist lets /131/ through;
+    ownership needs the metric row, so it is checked here."""
+    if is_limited(request) and m["dri_user_id"] != _data_actor_id(con, user):
+        raise full_login_required(request)
+
+
 @app.get("/131/{metric_id}/{week}", response_class=HTMLResponse)
 def one_three_one_page(metric_id: int, week: str, request: Request,
                        user=Depends(require_editor),
                        con: sqlite3.Connection = Depends(data_db_dep)):
     m = _metric_or_404(con, metric_id)
+    _link_session_owns(request, con, user, m)
     w = wk.parse_week(week)
     dri = con.execute(
         "SELECT display_name FROM users WHERE id = ?", (m["dri_user_id"],)
@@ -1090,7 +1293,7 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
                        recommendation: str = Form(...),
                        user=Depends(require_editor),
                        con: sqlite3.Connection = Depends(data_db_dep)):
-    _metric_or_404(con, metric_id)
+    _link_session_owns(request, con, user, _metric_or_404(con, metric_id))
     wk.parse_week(week)
     # Supersede rather than overwrite, and never silently drop the write: the
     # old INSERT OR IGNORE discarded a second filing without a word, which is
@@ -1110,16 +1313,44 @@ def one_three_one_save(metric_id: int, week: str, request: Request,
 
 # ---------------------------------------------------------------- TV display
 def _check_display_token(con: sqlite3.Connection, token: str) -> None:
-    if not token or token != dbm.get_setting(con, "display_token"):
+    expected = dbm.get_setting(con, "display_token") or ""
+    if not token or not expected or not hmac.compare_digest(
+            token.encode(), expected.encode()):
         raise HTTPException(403, "Bad display token")
 
 
+def _on_local_network(request: Request) -> bool:
+    """True when the caller is on a private, loopback or link-local address.
+    Behind the reverse proxy this is the forwarded client address (uvicorn
+    --proxy-headers), so internet visitors arrive as public IPs; a kiosk on the
+    office network reaches the app through the router and shows up private."""
+    host = request.client.host if request.client else ""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+_TV_REFUSED = ("The TV link is only available on the office network. An admin "
+               "can copy the display link from Admin > Settings.\n")
+
+
 @app.get("/tv")
-def tv_shortcut(view: str = "", con: sqlite3.Connection = Depends(db_dep)):
+def tv_shortcut(request: Request, view: str = "",
+                con: sqlite3.Connection = Depends(db_dep)):
     """Typeable shortcut for a TV/kiosk browser: looks up the current display
     token server-side and 302-redirects to /display. 302 (not 301/308) so the
     redirect is never cached and keeps working after the token is rotated.
-    /tv?view=ceo is a screen that holds one view instead of rotating."""
+    /tv?view=ceo is a screen that holds one view instead of rotating.
+
+    It hands out the display credential, so it answers the LOCAL network only:
+    the public site proxies every path, and an unguarded /tv made the whole
+    board public to anyone who guessed the URL."""
+    if not _on_local_network(request):
+        return PlainTextResponse(_TV_REFUSED, status_code=403)
     token = dbm.get_setting(con, "display_token") or ""
     pin = f"&view={view}" if view in TV_VIEWS else ""
     return RedirectResponse(f"/display?token={token}{pin}", status_code=302)
@@ -1389,6 +1620,17 @@ def toggle_key_metric(metric_id: int, user=Depends(require_admin),
     return RedirectResponse("/admin/metrics", status_code=303)
 
 
+def _is_local_path(target: str) -> bool:
+    """A redirect target that can only be a page of this app: one leading
+    slash, never "//" (scheme-relative), never a backslash (browsers read
+    "/\\host" as "//host"), and no whitespace or control characters, which
+    browsers strip before parsing ("/\\t/host" is "//host" too)."""
+    return (target.startswith("/") and not target.startswith("//")
+            and "\\" not in target
+            and not any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127
+                        for ch in target))
+
+
 @app.post("/admin/metrics/{metric_id}/owner")
 def set_metric_owner(metric_id: int, dri_user_id: str = Form(""), next: str = Form(""),
                      user=Depends(require_admin),
@@ -1404,7 +1646,7 @@ def set_metric_owner(metric_id: int, dri_user_id: str = Form(""), next: str = Fo
         raise HTTPException(422, f"No active user {uid}")
     con.execute("UPDATE metrics SET dri_user_id = ? WHERE id = ?", (uid, metric_id))
     # Only ever back to a page of this app: never an open redirect.
-    if not (next.startswith("/") and not next.startswith("//")):
+    if not _is_local_path(next):
         next = f"/admin/metrics#sec-{m['section_id']}"
     return RedirectResponse(next, status_code=303)
 
@@ -1461,23 +1703,47 @@ def edit_metric_page(metric_id: int, request: Request, user=Depends(require_admi
 
 
 @app.post("/admin/metrics/{metric_id}")
-def edit_metric(metric_id: int, section_id: int = Form(...), name: str = Form(...),
+def edit_metric(request: Request, metric_id: int, section_id: int = Form(...),
+                name: str = Form(...),
                 metric_type: str = Form(...), rollup: str = Form("sum"),
                 unit: str = Form(""), direction: str = Form("up"),
                 dri_user_id: str = Form(""), start_week: str = Form(...),
                 sort_order: int = Form(0), is_key: str = Form(""),
                 user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    _metric_or_404(con, metric_id)
-    start = wk.monday_of(date.fromisoformat(start_week)).isoformat()
-    con.execute(
-        """UPDATE metrics SET section_id=?, name=?, metric_type=?, rollup=?, direction=?,
-                              unit=?, dri_user_id=?, start_week=?, sort_order=?, is_key=?
-           WHERE id=?""",
-        (section_id, name, metric_type,
-         rollup if metric_type == "numeric" else None,
-         direction, unit or None,
-         int(dri_user_id) if dri_user_id else None, start, sort_order,
-         1 if is_key else 0, metric_id))
+    """Through admin_ops, like the API: a type change on a metric with entries
+    (every entry would stop scoring) and a second live name in the section are
+    refused, and the form comes back with the reason instead of a 500."""
+    m = _metric_or_404(con, metric_id)
+    if metric_type not in ("numeric", "binary", "status"):
+        raise HTTPException(422, f"Unknown metric type {metric_type!r}")
+    start = wk.monday_of(date.fromisoformat(start_week))
+    try:
+        admin_ops.update_metric(
+            con, metric_id, section_id=section_id, name=name, metric_type=metric_type,
+            rollup=rollup, direction=direction, unit=unit or None,
+            dri_user_id=int(dri_user_id) if dri_user_id else None,
+            start_week=start, sort_order=sort_order, is_key=bool(is_key))
+    except ValueError as e:   # admin_ops.Conflict is a ValueError
+        # Re-show what they typed, except the refused type.
+        shown = {**dict(m), "section_id": section_id, "name": name, "unit": unit,
+                 "rollup": rollup, "direction": direction,
+                 "dri_user_id": int(dri_user_id) if dri_user_id else None,
+                 "start_week": start.isoformat(), "sort_order": sort_order,
+                 "is_key": 1 if is_key else 0}
+        if admin_ops.type_change_refused(con, metric_id, m["metric_type"], metric_type):
+            shown["metric_type"] = m["metric_type"]
+        else:
+            shown["metric_type"] = metric_type
+        section = con.execute("SELECT * FROM sections WHERE id = ?",
+                              (m["section_id"],)).fetchone()
+        resp = render(request, "admin_metric_edit.html", user=user, active="metrics",
+                      m=shown, section=section,
+                      sections=con.execute("SELECT * FROM sections ORDER BY sort_order").fetchall(),
+                      users=con.execute("SELECT * FROM users WHERE is_active = 1 "
+                                        "ORDER BY display_name").fetchall(),
+                      flash=str(e), flash_kind="err")
+        resp.status_code = 409
+        return resp
     return RedirectResponse("/admin/metrics", status_code=303)
 
 
@@ -1857,7 +2123,8 @@ def _flag_cleared(con: sqlite3.Connection, ids: list[int]) -> None:
 
 
 def _tokens_page(request: Request, user, con: sqlite3.Connection,
-                 new_token=None, new_name=None, new_label=None, error=None,
+                 new_token=None, new_name=None, new_label=None, new_scope=None,
+                 error=None,
                  cleared: int = 0):
     rows = con.execute("SELECT * FROM api_tokens WHERE cleared_at IS NULL "
                        "ORDER BY created_at DESC").fetchall()
@@ -1876,7 +2143,10 @@ def _tokens_page(request: Request, user, con: sqlite3.Connection,
                   lineages=lineages, dead=dead, cleared=cleared,
                   grace_default=ROTATE_GRACE_DAYS, grace_max=ROTATE_GRACE_MAX,
                   mcp_base=base,
-                  mcp_url=f"{base}/mcp/t/{new_token}" if new_token else None,
+                  # /mcp/t/ accepts read-scoped tokens only (mcp.py), so a
+                  # connector URL for any other scope would be one that 401s.
+                  mcp_url=(f"{base}/mcp/t/{new_token}"
+                           if new_token and new_scope == "read" else None),
                   new_token=new_token, new_name=new_name,
                   new_label=new_label, error=error)
 
@@ -1893,19 +2163,19 @@ def create_token(request: Request, name: str = Form(...), scope: str = Form("rea
                  user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
     raw = new_api_token(con, name.strip(), scope, user["id"])
     return _tokens_page(request, user, con, new_token=raw, new_name=name.strip(),
-                        new_label="created")
+                        new_label="created", new_scope=scope)
 
 
 @app.post("/admin/tokens/{tid}/rotate", response_class=HTMLResponse)
 def rotate_token(request: Request, tid: int, grace_days: int = Form(ROTATE_GRACE_DAYS),
                  user=Depends(require_admin), con: sqlite3.Connection = Depends(db_dep)):
-    row = con.execute("SELECT name FROM api_tokens WHERE id = ?", (tid,)).fetchone()
+    row = con.execute("SELECT name, scope FROM api_tokens WHERE id = ?", (tid,)).fetchone()
     try:
         raw = rotate_api_token(con, tid, grace_days, user["id"])
     except ValueError as e:
         return _tokens_page(request, user, con, error=str(e))
     return _tokens_page(request, user, con, new_token=raw, new_name=row["name"],
-                        new_label="rotated")
+                        new_label="rotated", new_scope=row["scope"])
 
 
 @app.post("/admin/tokens/{tid}/revoke")
@@ -2122,6 +2392,8 @@ def admin_settings(request: Request, saved: str = "", tab: str = "",
                                   for k, ids in ceom.all_breakdown_ids(con).items()},
                   ceo_breakdown_err=request.query_params.get("bd_err", ""),
                   ceo_detected={k: names.get(v) for k, v in ceom.resolve_slots(con).items()},
+                  ceo_headcount=ceom.headcount_history(con),
+                  ceo_headcount_err=request.query_params.get("hc_err", ""),
                   hud_mrr_metric_id=dbm.get_setting(con, "hud_mrr_metric_id") or "",
                   mrr_goal=dbm.get_setting(con, "mrr_goal") or "",
                   mrr_milestones=dbm.get_setting(con, "mrr_milestones") or "",
@@ -2142,7 +2414,8 @@ def _slack_verify(con: sqlite3.Connection) -> readiness.Check:
 # never be rendered in one tab and redirected to another.
 SETTINGS_TABS = {
     "tv-display": "display", "tv-views": "display", "screensaver": "display",
-    "goal-band": "display", "ceo-view": "display", "ceo-breakdown": "display", "display-window": "display",
+    "goal-band": "display", "ceo-view": "display", "ceo-breakdown": "display",
+    "ceo-headcount": "display", "display-window": "display",
     "slack": "notify", "nudges": "notify", "channels": "notify",
     "demo": "advanced",
 }
@@ -2190,6 +2463,28 @@ def remove_ceo_category(slot: str, metric_id: int = Form(...), user=Depends(requ
     return _settings_saved("ceo-breakdown")
 
 
+@app.post("/admin/settings/ceo-headcount/add")
+def add_ceo_headcount(month: str = Form(""), headcount: str = Form(""),
+                      user=Depends(require_admin),
+                      con: sqlite3.Connection = Depends(db_dep)):
+    """Headcount from a month on, for revenue per employee (ceo.set_headcount
+    says why it is a dated history and not a metric)."""
+    try:
+        ceom.set_headcount(con, month, headcount)
+    except ValueError as e:
+        return RedirectResponse(
+            f"/admin/settings?tab=display&hc_err={quote_plus(str(e))}#ceo-headcount",
+            status_code=303)
+    return _settings_saved("ceo-headcount")
+
+
+@app.post("/admin/settings/ceo-headcount/remove")
+def remove_ceo_headcount(month: str = Form(""), user=Depends(require_admin),
+                         con: sqlite3.Connection = Depends(db_dep)):
+    ceom.remove_headcount(con, month)
+    return _settings_saved("ceo-headcount")
+
+
 @app.post("/admin/settings/ceo-view")
 def save_ceo_view(slot_revenue: str = Form(""), slot_expenses: str = Form(""),
                   slot_leads: str = Form(""), slot_conversions: str = Form(""),
@@ -2210,7 +2505,9 @@ def save_ceo_view(slot_revenue: str = Form(""), slot_expenses: str = Form(""),
 @app.post("/admin/settings/display-months")
 def save_display_months(display_months: int = Form(...), user=Depends(require_admin),
                         con: sqlite3.Connection = Depends(db_dep)):
-    dbm.set_setting(con, "display_months", str(max(1, min(4, display_months))))
+    # The form offers 2-4; one month left the window empty before the month's
+    # first Monday.
+    dbm.set_setting(con, "display_months", str(gridm.clamp_display_months(display_months)))
     return _settings_saved("display-window")
 
 

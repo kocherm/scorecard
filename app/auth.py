@@ -6,6 +6,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -16,6 +17,14 @@ from .db import db_dep
 
 SESSION_COOKIE = "scorecard_session"
 SESSION_DAYS = 30
+# A session minted from a check-in link (scope 'checkin') is LIMITED: half a
+# day, never extended, and refused everywhere outside the check-in allowlist
+# below. The link is DM'd weekly and lives seven days; if redeeming it gave the
+# owner's full role for 30 days, an admin's nudge would be an admin session -
+# and, through require_self, a passkey that outlives everything - for whoever
+# opened it first.
+LINK_SESSION_HOURS = 12
+FULL_SCOPE, CHECKIN_SCOPE = "full", "checkin"
 
 _ph = PasswordHasher()
 
@@ -35,12 +44,23 @@ def _sha256(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-def create_session(con: sqlite3.Connection, user_id: int) -> str:
+def session_ttl(scope: str = FULL_SCOPE) -> timedelta:
+    """Lifetime of a session of this scope - also the cookie's max_age."""
+    if scope == FULL_SCOPE:
+        return timedelta(days=SESSION_DAYS)
+    return timedelta(hours=LINK_SESSION_HOURS)
+
+
+def create_session(con: sqlite3.Connection, user_id: int,
+                   scope: str = FULL_SCOPE) -> str:
+    """expires_at is fixed here and never moved: activity does not extend a
+    session, so a limited one really does end LINK_SESSION_HOURS later."""
     token = secrets.token_urlsafe(32)
-    expires = (datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)).isoformat()
+    expires = (datetime.now(timezone.utc) + session_ttl(scope)).isoformat()
     con.execute(
-        "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?,?,?)",
-        (_sha256(token), user_id, expires),
+        "INSERT INTO sessions (token_hash, user_id, expires_at, scope) "
+        "VALUES (?,?,?,?)",
+        (_sha256(token), user_id, expires, scope),
     )
     return token
 
@@ -60,7 +80,8 @@ def user_from_request(request: Request, con: sqlite3.Connection) -> Optional[sql
     if not token:
         return None
     row = con.execute(
-        """SELECT u.*, s.impersonate_user_id FROM sessions s
+        """SELECT u.*, s.impersonate_user_id, s.scope AS session_scope
+           FROM sessions s
            JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = ? AND s.expires_at > ? AND u.is_active = 1""",
         (_sha256(token), datetime.now(timezone.utc).isoformat()),
@@ -70,6 +91,12 @@ def user_from_request(request: Request, con: sqlite3.Connection) -> Optional[sql
             "UPDATE sessions SET last_seen_at = datetime('now') WHERE token_hash = ?",
             (_sha256(token),),
         )
+        # Anything but 'full' is limited - fail closed on an unknown value.
+        request.state.limited_session = row["session_scope"] != FULL_SCOPE
+        if request.state.limited_session:
+            # No view-as from a limited session: starting one needs
+            # require_admin, which refuses it, but never honour a stale target.
+            return _with_badges(request, con, row)
     # View-as-user: an admin's session may carry an impersonation target. The
     # effective user is returned (so role checks, nav, and every surface match
     # what the target sees); the real admin rides along on request.state for
@@ -82,6 +109,11 @@ def user_from_request(request: Request, con: sqlite3.Connection) -> Optional[sql
         if target is not None:
             request.state.impersonator = row
             row = target
+    return _with_badges(request, con, row)
+
+
+def _with_badges(request: Request, con: sqlite3.Connection,
+                 row: Optional[sqlite3.Row]) -> Optional[sqlite3.Row]:
     if row is not None and row["role"] != "viewer":
         # Nav badge: how many of the (effective) user's numbers are still
         # missing for the due week. Real DB by design, even in demo mode.
@@ -112,7 +144,58 @@ class RequireRole:
             raise HTTPException(status_code=303, headers={"Location": "/login"})
         if self.ORDER[user["role"]] < self.ORDER[self.role]:
             raise HTTPException(status_code=403, detail="Insufficient role")
+        if is_limited(request) and (self.role == "admin"
+                                    or not link_scope_allows(request)):
+            raise full_login_required(request)
         return user
+
+
+def is_limited(request: Request) -> bool:
+    """True when this request rides a check-in-link session (scope 'checkin')."""
+    return bool(getattr(request.state, "limited_session", False))
+
+
+# Everything a LIMITED session may reach - deny by default, so a route added
+# tomorrow is refused to a check-in link until someone decides otherwise. The
+# check-in pages and their POSTs, 1-3-1s (the routes additionally insist the
+# metric is yours), and READING the board, the CEO page and metric pages.
+# Never: require_admin (refused outright, whatever this list says),
+# require_self (credentials), /account (password), board edits, view-as.
+_LINK_ANY_METHOD = ("/checkin/", "/131/")
+_LINK_READ_EXACT = ("/", "/ceo")
+_LINK_READ_PREFIX = ("/m/",)
+
+
+def link_scope_allows(request: Request) -> bool:
+    path = request.url.path
+    if path == "/checkin" or path.startswith(_LINK_ANY_METHOD):
+        return True
+    if request.method in ("GET", "HEAD"):
+        return path in _LINK_READ_EXACT or path.startswith(_LINK_READ_PREFIX)
+    return False
+
+
+FULL_LOGIN_MESSAGE = "Sign in with your password to do that."
+
+
+def full_login_required(request: Request) -> HTTPException:
+    """Refusal for a limited session: off to the login form, which says why
+    (login.html keys the message off why=full - the text is never taken from
+    the URL), rather than a bare 403. A person who clicked a nudge and then
+    wants Admin just signs in, and the password session replaces this one.
+    next= is offered only for a GET - a POST target is not a page to land on."""
+    params = {"why": "full"}
+    if request.method in ("GET", "HEAD"):
+        params["next"] = request.url.path + (
+            f"?{request.url.query}" if request.url.query else "")
+    loc = "/login?" + urlencode(params)
+    if request.headers.get("HX-Request"):
+        # htmx does not follow a 303 into a page; it would swap the login form
+        # into a table cell. HX-Redirect makes it navigate instead.
+        return HTTPException(status_code=403, detail=FULL_LOGIN_MESSAGE,
+                             headers={"HX-Redirect": loc})
+    return HTTPException(status_code=303, detail=FULL_LOGIN_MESSAGE,
+                         headers={"Location": loc})
 
 
 require_viewer = RequireRole("viewer")
@@ -131,7 +214,13 @@ def require_self(request: Request, user: sqlite3.Row = Depends(require_viewer)):
     the impersonation, survives the target's next password reset (which keeps
     passkeys on purpose), and keeps working after the admin is demoted. The
     banner promises anything saved is recorded as the admin; this is what makes
-    that true for credentials rather than merely claimed."""
+    that true for credentials rather than merely claimed.
+
+    A check-in-link session is refused too (already, by require_viewer's
+    allowlist; again here so widening that list can never reach a credential):
+    a link that sat in a DM for a week must not become a passkey."""
+    if is_limited(request):
+        raise full_login_required(request)
     if getattr(request.state, "impersonator", None) is not None:
         raise HTTPException(status_code=403,
                             detail="Exit view-as before changing passkeys")

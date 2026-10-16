@@ -7,7 +7,7 @@ missing and never duplicates what exists, the view stays out of the rotation
 until it has something to show, and the derived ratios only combine numbers
 from the same week.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +17,20 @@ from app import ceo as ceom
 from app import db as dbm
 from app import weeks as wk
 
-NOW = datetime.now(timezone.utc)
-CLOSED = wk.last_closed_week(NOW)
-CUR = wk.current_week(NOW)
+# Read the clock when a test runs, not when the module is imported: a session
+# that straddles a week (or quarter) boundary must not compare against a
+# stale week. The data lands in the last CLOSED week, which in quarter week 1
+# belongs to the PREVIOUS quarter - target() covers both.
+def now():
+    return datetime.now(timezone.utc)
+
+
+def closed():
+    return wk.last_closed_week(now())
+
+
+def cur():
+    return wk.current_week(now())
 
 
 @pytest.fixture
@@ -72,10 +83,11 @@ def enter(con, mid, week, value):
 
 
 def target(con, mid, value):
-    y, q = wk.quarter_of(CUR)
-    con.execute(
-        """INSERT INTO targets (metric_id, year, quarter, baseline_value, stretch_value)
-           VALUES (?,?,?,?,?)""", (mid, y, q, value, value))
+    """The same target for the closed week's quarter and the current one."""
+    for y, q in {wk.quarter_of(closed()), wk.quarter_of(cur())}:
+        con.execute(
+            """INSERT INTO targets (metric_id, year, quarter, baseline_value, stretch_value)
+               VALUES (?,?,?,?,?)""", (mid, y, q, value, value))
 
 
 # ------------------------------------------------------------- the template
@@ -97,7 +109,7 @@ def test_one_click_adds_seven_ordinary_metrics_and_leaves_the_tv_alone(env):
     assert by["Expenses"]["direction"] == "down" and by["CAC"]["direction"] == "down"
     assert by["Retention"]["unit"] == "%" and by["Leads"]["unit"] is None
     assert all(m["dri_user_id"] == 1 for m in rows), "owned by whoever pressed the button"
-    assert all(m["start_week"] == CUR.isoformat() for m in rows)
+    assert all(m["start_week"] == cur().isoformat() for m in rows)
     # Opt-in on the TV: adding metrics never changes what the wall shows.
     assert (setting("display_views") or "board") == "board"
     for s in ceom.SLOTS:
@@ -177,14 +189,15 @@ def seed_full_week(con, values: dict, targets: dict):
     """Install, then give every slot a number for the last closed week and a
     target for the quarter. start_week is moved back: a metric created this
     week has no scored history yet, same as one added by hand."""
-    res = ceom.install_template(con, NOW, dri_user_id=1)
+    res = ceom.install_template(con, now(), dri_user_id=1)
     assert len(res.created) == 7
     # Nothing enables the view but Settings > TV views; do it as the admin would.
     dbm.set_setting(con, "display_views", "board,ceo")
-    con.execute("UPDATE metrics SET start_week = '2026-01-05'")
+    con.execute("UPDATE metrics SET start_week = ?",
+                ((closed() - timedelta(weeks=26)).isoformat(),))
     ids = {k: int(dbm.get_setting(con, ceom.setting_key(k))) for k in values}
     for k, v in values.items():
-        enter(con, ids[k], CLOSED, v)
+        enter(con, ids[k], closed(), v)
         target(con, ids[k], targets[k])
     return ids
 
@@ -223,7 +236,7 @@ def test_ratios_never_mix_weeks(env):
         # This week's leads are in; this week's conversions are not, so the
         # tile falls back to last week's - a close rate across the two would
         # be a number nobody asked for.
-        enter(con, ids["leads"], CUR, 40)
+        enter(con, ids["leads"], cur(), 40)
     html = body(env, view="ceo")
     # The connector stays, its ratio does not: neither 8/100 nor 8/40.
     assert "close rate" not in html and "8.0%" not in html and "20.0%" not in html
@@ -233,7 +246,7 @@ def test_ratios_never_mix_weeks(env):
 def test_an_unmapped_slot_is_a_hint_on_a_live_board(env):
     with dbm.get_db() as con:
         rid = add_metric(con, "Revenue")
-        enter(con, rid, CLOSED, 1000)
+        enter(con, rid, closed(), 1000)
         dbm.set_setting(con, "display_views", "ceo")
     html = body(env, view="ceo")
     assert "CEO metrics" in html

@@ -76,8 +76,15 @@
             {% if r.prev_actual is not none %}
             <button type="button" class="tg-q" data-tg-fill="{{ '%g'|format(r.prev_actual) }}"
                     title="Use last quarter's actual as the baseline">Match</button>
+            {# "Better by 10%": up for higher-is-better, DOWN for a budget -
+               raising an expenses or CAC target would loosen it. #}
+            {% if r.metric['direction'] == 'down' %}
+            <button type="button" class="tg-q" data-tg-bump="0.9"
+                    title="Lower the budget 10% (lower is better)">&minus;10%</button>
+            {% else %}
             <button type="button" class="tg-q" data-tg-bump="1.1"
                     title="Raise the baseline 10%">+10%</button>
+            {% endif %}
             {% endif %}
           </td>
         </tr>

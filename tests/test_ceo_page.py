@@ -115,7 +115,10 @@ def test_show_on_tv_pins_the_view_even_when_it_is_not_in_the_rotation(env):
     with dbm.get_db() as con:
         assert (dbm.get_setting(con, "display_views") or "board") == "board"
     assert "CEO metrics" in c.get("/display/body", params={"token": "tok", "view": "ceo"}).text
-    r = c.get("/tv", params={"view": "ceo"}, follow_redirects=False)
+    # /tv answers the office network only (test_security_hardening.py).
+    from app.main import app
+    lan = TestClient(app, client=("10.20.30.40", 50000))
+    r = lan.get("/tv", params={"view": "ceo"}, follow_redirects=False)
     assert r.headers["location"] == "/display?token=tok&view=ceo"
-    assert c.get("/tv", params={"view": "nope"},
+    assert lan.get("/tv", params={"view": "nope"},
                  follow_redirects=False).headers["location"] == "/display?token=tok"

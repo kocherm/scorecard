@@ -8,7 +8,7 @@
 </div>
 {% if new_token %}
 <div class="flash ok">Token <strong>{{ new_name }}</strong> {{ new_label }}: <span class="mono">{{ new_token }}</span> - copy it now; it is not shown again.{% if new_label == 'rotated' %} Paste it into the integration; the old secret keeps working until it expires, and this page flags it if anything is still calling with it.{% endif %}
-  <div class="mcp-url">Claude connector URL for this token:<br><span class="mono">{{ mcp_url }}</span></div>
+  {% if mcp_url %}<div class="mcp-url">Claude connector URL for this token:<br><span class="mono">{{ mcp_url }}</span></div>{% endif %}
 </div>
 {% endif %}
 {% if error %}
@@ -21,7 +21,7 @@
   {% if dead %}
   <div class="token-clear">
     <form method="post" action="/admin/tokens/clear">
-      <button class="btn secondary sm" onclick="return confirm('Clear {{ dead }} revoked or expired token{{ 's' if dead != 1 }} from this list? None of them can authenticate, and the numbers they wrote keep their name.')">Clear revoked ({{ dead }})</button>
+      <button class="btn secondary sm" data-confirm="Clear {{ dead }} revoked or expired token{{ 's' if dead != 1 }} from this list? None of them can authenticate, and the numbers they wrote keep their name." onclick="return confirm(this.dataset.confirm)">Clear revoked ({{ dead }})</button>
     </form>
   </div>
   {% endif %}
@@ -40,14 +40,14 @@
         <form method="post" action="/admin/tokens/{{ h.t['id'] }}/rotate">
           <input type="number" name="grace_days" value="{{ grace_default }}" min="0" max="{{ grace_max }}" class="grace-days" title="Days the current secret keeps working (0 = cut over now)">
           <span class="note">d grace</span>
-          <button class="btn sm" onclick="return confirm('Rotate {{ h.t['name'] }}? The current secret keeps working for the grace period.')">Rotate</button>
+          <button class="btn sm" data-confirm="Rotate {{ h.t['name'] }}? The current secret keeps working for the grace period." onclick="return confirm(this.dataset.confirm)">Rotate</button>
         </form>
         <form method="post" action="/admin/tokens/{{ h.t['id'] }}/revoke">
-          <button class="btn danger sm" onclick="return confirm('Revoke {{ h.t['name'] }}? Anything using it stops working immediately.')">Revoke</button>
+          <button class="btn danger sm" data-confirm="Revoke {{ h.t['name'] }}? Anything using it stops working immediately." onclick="return confirm(this.dataset.confirm)">Revoke</button>
         </form>
         {% elif g.clearable %}
         <form method="post" action="/admin/tokens/{{ h.t['id'] }}/delete">
-          <button class="btn secondary sm" onclick="return confirm('Delete {{ h.t['name'] }} from this list? The numbers it wrote keep its name.')">Delete</button>
+          <button class="btn secondary sm" data-confirm="Delete {{ h.t['name'] }} from this list? The numbers it wrote keep its name." onclick="return confirm(this.dataset.confirm)">Delete</button>
         </form>
         {% endif %}
       </td>
@@ -65,11 +65,11 @@
       <td class="token-actions">
         {% if p.live %}
         <form method="post" action="/admin/tokens/{{ p.t['id'] }}/revoke">
-          <button class="btn danger sm" onclick="return confirm('Revoke the previous {{ p.t['name'] }} secret now?')">Revoke now</button>
+          <button class="btn danger sm" data-confirm="Revoke the previous {{ p.t['name'] }} secret now?" onclick="return confirm(this.dataset.confirm)">Revoke now</button>
         </form>
         {% else %}
         <form method="post" action="/admin/tokens/{{ p.t['id'] }}/delete">
-          <button class="btn secondary sm" onclick="return confirm('Delete the previous {{ p.t['name'] }} secret from this list? The numbers it wrote keep its name.')">Delete</button>
+          <button class="btn secondary sm" data-confirm="Delete the previous {{ p.t['name'] }} secret from this list? The numbers it wrote keep its name." onclick="return confirm(this.dataset.confirm)">Delete</button>
         </form>
         {% endif %}
       </td>

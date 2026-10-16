@@ -23,6 +23,15 @@ def env(tmp_path, monkeypatch):
 
     due = due_week()
     start = (due - timedelta(days=56)).isoformat()
+    # Eight weeks back crosses into the previous quarter early in a quarter, so
+    # give every quarter from start through the current week a target - one
+    # row for due's quarter only left the Red Metric's older weeks unscored
+    # in quarter weeks 1-2 and its streak short.
+    quarters, w = [], due - timedelta(days=56)
+    while w <= wk.current_week(datetime.now(timezone.utc)):
+        if wk.quarter_of(w) not in quarters:
+            quarters.append(wk.quarter_of(w))
+        w += timedelta(days=7)
     with dbm.get_db() as con:
         dbm.init_db(con)
         con.execute("INSERT INTO sections (id, name, sort_order) VALUES (1,'Sales',0)")
@@ -35,10 +44,11 @@ def env(tmp_path, monkeypatch):
                 """INSERT INTO metrics (id, section_id, name, metric_type, rollup,
                                         start_week, dri_user_id)
                    VALUES (?,1,?,'numeric','sum',?,1)""", (mid, name, start))
-            con.execute(
-                """INSERT INTO targets (metric_id, year, quarter, baseline_value,
-                                        stretch_value) VALUES (?,?,?,10,10)""",
-                (mid,) + wk.quarter_of(due))
+            for yq in quarters:
+                con.execute(
+                    """INSERT INTO targets (metric_id, year, quarter, baseline_value,
+                                            stretch_value) VALUES (?,?,?,10,10)""",
+                    (mid,) + yq)
         # Red Metric: three closed weeks well under target -> a red streak.
         for i in range(3):
             dbm.upsert_entry(con, 1, due - timedelta(days=7 * i), value_numeric=1.0,

@@ -280,3 +280,80 @@ def resolve_category(con: sqlite3.Connection, slot: str, ref) -> Optional[int]:
         if r["name"].strip().lower() == s.lower():
             return r["id"]
     return None
+
+
+# ------------------------------------------------------- headcount
+# Revenue per employee needs a headcount, and headcount is NOT a weekly
+# metric: it changes a few times a year, and as a metric it would go stale
+# every week it was not re-typed (the Wednesday sweep reads every live
+# metric, hidden sections included). So it is a short dated history in
+# settings - "14 from June 2026" - read with carry-forward: a month uses the
+# newest figure that took effect on or before it. A history rather than one
+# number because the trend divides LAST year's revenue by last year's team;
+# dividing it by today's headcount would invent a slump for every hire.
+# Fractions are allowed (FTEs). Lives beside the slot mapping, same db.
+HEADCOUNT_KEY = "ceo_headcount"
+
+
+def _month_key(s: str) -> Optional[str]:
+    try:
+        d = datetime.strptime(s.strip(), "%Y-%m")
+    except ValueError:
+        return None
+    return f"{d.year:04d}-{d.month:02d}"
+
+
+def headcount_history(con: sqlite3.Connection) -> list[tuple[str, float]]:
+    """[("YYYY-MM", headcount)] oldest first; unparseable parts are dropped."""
+    out = {}
+    for part in (dbm.get_setting(con, HEADCOUNT_KEY) or "").split(","):
+        month, _, n = part.partition(":")
+        key = _month_key(month)
+        try:
+            v = float(n)
+        except ValueError:
+            continue
+        if key and v > 0:
+            out[key] = v
+    return sorted(out.items())
+
+
+def _save_headcount(con: sqlite3.Connection, hist: dict) -> None:
+    dbm.set_setting(con, HEADCOUNT_KEY,
+                    ",".join(f"{k}:{v:g}" for k, v in sorted(hist.items())))
+
+
+def set_headcount(con: sqlite3.Connection, month: str, value: str) -> None:
+    """Record the headcount from `month` on (replacing that month's figure).
+    Raises ValueError with a showable message."""
+    key = _month_key(month or "")
+    if key is None:
+        raise ValueError("Pick the month the headcount took effect")
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("Headcount must be a number") from None
+    if not 0 < n < 1_000_000:
+        raise ValueError("Headcount must be more than zero")
+    hist = dict(headcount_history(con))
+    hist[key] = n
+    _save_headcount(con, hist)
+
+
+def remove_headcount(con: sqlite3.Connection, month: str) -> None:
+    hist = dict(headcount_history(con))
+    hist.pop(_month_key(month or "") or "", None)
+    _save_headcount(con, hist)
+
+
+def headcount_for(history: list[tuple[str, float]],
+                  ym: tuple[int, int]) -> Optional[float]:
+    """The figure in effect for month `ym`, or None before the first one."""
+    key = f"{ym[0]:04d}-{ym[1]:02d}"
+    found = None
+    for k, v in history:
+        if k <= key:
+            found = v
+        else:
+            break
+    return found

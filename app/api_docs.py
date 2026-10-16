@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from .api import router as api_router
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 DESCRIPTION = """\
 Read the company scorecard, write weekly numbers into it, and manage who owns

@@ -8,7 +8,8 @@
 {% endfor %}{% endfor %}{% endfor %}
 <section class="v-key" style="--n:{{ keys|length if keys else 1 }}">
   {% for r in keys %}
-  <article class="vk-tile">
+  {# The state class carries the non-colour cue (corner notch / bottom bar). #}
+  <article class="vk-tile {{ r.latest_state }}">
     <div class="vk-name">{{ r.name }}</div>
     <div class="vk-num {{ r.latest_state }}">{{ r.latest_display if r.latest_display != '-' else '&mdash;'|safe }}</div>
     <div class="vk-target">

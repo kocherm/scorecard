@@ -1,6 +1,11 @@
 {% macro cell_td(row, cell, editable, last_closed) %}
+{# "Why is this red?" in words (app/hints.py): the title for a mouse, the
+   aria-label for a screen reader. On touch the same facts are one tap away
+   on /m/{id}, which the metric name links to. #}
+{% set hint = cell_hint(row, cell, last_closed) %}
 <td id="cell-{{ row.metric_id }}-{{ cell.week.isoformat() }}"
     class="cell {% if cell.week >= last_closed %}hot{% endif %} {% if cell.week == last_closed %}due-week{% endif %} {% if cell.is_current %}current-week{% endif %} {% if editable and cell.editable %}editable{% endif %}"
+    {% if hint %}title="{{ hint }}" aria-label="{{ row.name }}, {{ cell.week | qlabel }}: {{ hint }}"{% endif %}
     {% if editable and cell.editable %}
     hx-get="/cell/{{ row.metric_id }}/{{ cell.week.isoformat() }}/edit"
     hx-target="this" hx-swap="outerHTML"

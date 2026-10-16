@@ -47,6 +47,35 @@ Slack app manifest). Check `git grep` before every commit.
   it gets muted before week 3 arrives. red_sweep runs 5 minutes AFTER
   summary_sweep because it replies into that thread; same-minute cron jobs
   would race for the parent.
+- How a sweep SENDS is as load-bearing as what it sends:
+  - Claim (alerts_sent) and COMMIT first, make the network calls with no
+    write transaction open, then record the results in a second short
+    transaction. Slack calls have 10s timeouts and every logged-in request
+    writes sessions.last_seen_at, so a send inside the write lock is a
+    "database is locked" 500 for whoever is using the board.
+  - A send that fails RELEASES its claim, so the next run retries it, and
+    only delivered messages are counted in sweep_runs. The exception is the
+    stale claim: it means "flagged", and releasing it would repost the
+    channel roll-up.
+  - Only a closed week that is itself red escalates (row.last_state).
+    consecutive_red_weeks skips PENDING weeks on purpose, so on a Tuesday
+    when last week has no number yet the streak still reads 2, and claiming
+    on it re-posted an escalation the channel already had.
+  - Red DMs are one per person, private channels only (deliver_secret). A
+    check-in nudge carries its magic link only where deliver_secret allows;
+    a shared channel gets the plain /checkin URL.
+  - stale_sweep skips hidden sections, like check-in and nudges do.
+    Otherwise it named people in the channel for numbers no DM ever asked
+    them for.
+- The scheduler has a 4h misfire grace and coalesce, and every job runs
+  through alerts.guarded. It runs one sweep at a time and records a crash as
+  outcome 'error' on its OWN connection, because the sweep's transaction
+  rolls back with the crash. It stores the exception type only: a message
+  can hold a webhook URL. 30s after boot, alerts.catch_up_sweeps runs any
+  sweep whose slot this week passed with no run, in the order summary, red,
+  stale. A fresh job's next run is computed from when it is added, so a
+  container that was down over Tuesday 08:00 would otherwise skip the week.
+  alerts.SCHEDULE must match the CronTriggers.
 - app/mcp.py is a remote MCP server (JSON-RPC over Streamable HTTP at /mcp) so
   Claude can READ the board conversationally. It is read-only on purpose: an
   API write is attributed to a token, and the connector authenticates as one
@@ -93,6 +122,33 @@ Slack app manifest). Check `git grep` before every commit.
   magic_links.purpose enforces the other direction - a check-in link is DM'd
   weekly and lives 7 days, so consume_magic_link matches purpose rather than
   assuming it, or the weakest token in the system becomes the strongest.
+  Redeeming a check-in link gives a LIMITED session (sessions.scope =
+  'checkin'): 12 hours, never extended by activity, never in view-as. A
+  nudge is the most-forwarded credential the app sends, and a full session
+  from one made whoever opened an admin's link an admin for 30 days, with
+  a passkey to keep. auth.RequireRole refuses it on require_admin and
+  otherwise allows only auth.link_scope_allows paths. That is default-deny,
+  so a new route is closed to it until someone adds it on purpose.
+  require_self refuses it too. A refusal sends the person to
+  /login?why=full, and a password or passkey login replaces the session
+  with a full one.
+- Other credential rules:
+  - /tv hands out the display token, so it answers only private, loopback
+    and link-local clients. That depends on --proxy-headers: behind the
+    reverse proxy the internet arrives as public IPs. FORWARDED_ALLOW_IPS is
+    "*" in the image, so set it to the proxy's address in a local compose
+    override.
+  - /mcp/t/<token> accepts read-scope tokens only.
+  - Any credential carried in a URL must also be redacted from the access
+    log by RedactCredentialsFilter in main.py.
+  - Changing a password signs out the user's other sessions.
+  - Redirect targets taken from input go through main._is_local_path.
+  - CrossSiteGuard refuses cross-site unsafe methods, checking
+    Sec-Fetch-Site first and then Origin. A new machine endpoint (webhook,
+    bearer route) must be added to its exemptions, or it gets a 403.
+  - Never put {{ }} inside an on*= attribute or a <script> block: the
+    browser decodes the HTML escaping before the JS runs. Pass values
+    through a data- attribute. A test enforces this.
 - Routes that mint or remove a CREDENTIAL use auth.require_self, never
   require_viewer. View-as resolves to the TARGET everywhere else by design, so
   under require_viewer an admin viewing as someone could register a passkey
@@ -178,6 +234,22 @@ Slack app manifest). Check `git grep` before every commit.
   when every category has a number that week - a short sum written
   confidently is worse than no total. "Use the sum" on the page applies the
   same rule and recomputes from entries, never from the form.
+- Revenue per employee on /ceo (grid.build_rpe) is the one MONTHLY number
+  in the app. Two rules carry it. A summed revenue metric is the average
+  week x 52/12, never the month's sum: months are the Mondays in them, so a
+  plain sum swings 25% between four- and five-Monday months and reads a
+  missing week as a slump. And headcount is a dated history in settings
+  (ceo_headcount = "YYYY-MM:n,...", ceo.headcount_for carries it forward),
+  NOT a metric. A metric is a weekly number: in a visible section, check-in
+  and the stale sweep would ask for it every week, for a number that changes
+  twice a year. In a hidden one it would still need a value every week to
+  have a history. Annualized is ?rpe=year, x12 at display only. Only CLOSED
+  months count (weeks.last_closed_month: the month whose last Monday's week
+  has ended), so the month in progress never shows up looking low; a closed
+  month missing weeks is estimated from the weeks entered and flagged
+  "N of M weeks entered", never silently read short. A point-in-time revenue
+  metric (rollup 'average', e.g. MRR) is averaged, not scaled. The TV view
+  does not show it.
 - A long client list is absorbed in three steps, in this order, and the order
   is the design (grid._layout_board): a roster section (every row R/Y/G) first
   WIDENS into up to MAX_SUBCOLS sub-columns, then folds its greenest rows into
@@ -215,7 +287,30 @@ Slack app manifest). Check `git grep` before every commit.
   and green on the board would be worse than not having the page. Entry links
   point at whichever page can actually save that week (/checkin, ?week= for the
   current one, /checkin/catch-up for older), and only for the DRI, since
-  /checkin only lists metrics you own.
+  /checkin only lists metrics you own. The route is /m/{metric_id:int}:
+  without the converter it swallowed /m/{id}.csv and answered 422.
+- Every number is paired with its OWN week's target, read from that week's
+  own quarter (Cell.target). The red streak has exactly one implementation,
+  grid.closed_states_desc, which both the board and /m/{id} call. The page
+  used to score the previous quarter's weeks against this quarter's target
+  and disagreed with the board in the first weeks of every quarter. The TV,
+  CEO tiles and API (`target`, API 1.3.0) show the displayed week's target,
+  never the current week's. That mismatch paired a Q3 number with a Q4
+  target and called a week-6 number short of the week-7 stretch. The goal
+  band's pace is the one deliberate exception.
+- Cell hints ("why is this red") and the CSV exports (app/hints.py,
+  app/export.py) read Cell.target, Cell.pace and the state cell_state
+  already computed. They never score again: an export that disagreed with
+  the board would be worse than none. Red and yellow also carry a shape,
+  a corner notch and an underline (the --notch/--bar block in
+  scorecard.css), so state is not colour-only. A new view that colours by
+  state adds its selector there.
+- A metric's type is fixed once it has entries (admin_ops.type_change_refused,
+  enforced by the form and by the API, which never takes a type). A numeric
+  value read as a status crashed every surface at once. scoring.entry_fits
+  makes any stray mismatched row read as no data rather than a 500.
+  display_months is clamped to grid.DISPLAY_MONTHS (2-4): one month can
+  leave the window with no weeks.
 
 - The BOARD is writable, and says so. Every row carries a pencil in the metric
   column (sticky, so it survives the horizontal scroll) which opens a <dialog>
@@ -281,9 +376,35 @@ uv run pytest -q                 # engine tests
 uv run python -m migrate.seed    # seed empty DB (prints creds ONCE)
 uv run uvicorn app.main:app --port 8096   # dev server
 docker compose up -d --build     # prod-style run on 127.0.0.1:8096
+# after any dependency change (uv.lock is gitignored; this file is the pin):
+uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
 ```
 
 ## Gotchas
+
+- Tests that build fixtures relative to datetime.now() pass most of the year
+  and fail in the first weeks of a quarter. "Eight weeks back" crosses into
+  the previous quarter, which has no target row, and the quarter on the page
+  holds only one or two weeks. In October 2026 (Q4 W2) this sent five tests
+  red on unmodified code, and the fixtures have since been fixed. That
+  red run was also how the /m/{id} streak bug surfaced, so a test like this
+  can be catching a real bug. A fixture must create targets for every
+  quarter its data touches, or pass a fixed `now`. To prove a test doesn't
+  depend on the date, run it under time-machine at boundary dates (quarter
+  weeks 1-2 and 14, Dec 31/Jan 1, Sunday 23:30 Chicago), one process per
+  date. SQLite's datetime('now') can't be frozen, so the activity LATE flag
+  and the token grace tests fail under a frozen clock no matter what.
+- Boot ALTERs go through main._add_column, which ignores only "duplicate
+  column name". A bare `except OperationalError: pass` also swallowed
+  "database is locked". The schema.sql replay trap now applies to
+  sessions.scope too (migrate/session_scope), and sweep_runs' 'error' outcome
+  came in through a table rebuild (migrate/sweep_error).
+- /healthz stays unauthenticated and sync, opens its own connection, and
+  returns only {ok, db, scheduler}. The compose healthcheck uses it.
+- Never copy scorecard.db by hand under WAL. deploy/backup.sh snapshots it
+  through the backup API, runs integrity_check before rotating, and can copy
+  off-host (BACKUP_REMOTE). To restore, move the db, -wal and -shm aside
+  together (README).
 
 - A metric can be OWNED BY AN AUTOMATION writing through the JSON API, not by a
   person typing. POST /entries is an upsert of an absolute value, so a daily

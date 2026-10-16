@@ -326,6 +326,15 @@ so the wall keeps showing what it showed. Rules:
   inputs come from the same week. An unmapped slot shows as "Not tracked"
   with a pointer to the setting; the view is skipped by the rotation while
   no slot is mapped at all.
+- Revenue per employee (the /ceo page only, not the TV) is MONTHLY: each
+  closed month's revenue divided by the headcount in effect that month, with
+  an Annualized toggle (x 12, labelled a run rate), the change on the month
+  and the year before, and a 12-month trend. A weekly-summed revenue metric
+  counts as its average week x 52/12, so four- and five-Monday months
+  compare fairly and a month missing a week is estimated (and flagged)
+  rather than read as a slump; a point-in-time MRR is averaged as it is.
+  Headcount is a dated history set by an admin ("11.5 from July"), carried
+  forward, not a weekly metric - nobody is asked for it every Monday.
 
 ## Review cadence (methodology, enforced socially not in code)
 

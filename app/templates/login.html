@@ -11,7 +11,10 @@
   <div class="login-card">
     <div class="brandline"><span class="seam"></span><span class="wordmark">APRENDIO</span></div>
     <h1>Company Scorecard</h1>
-    {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+    {% if error %}<div class="flash err">{{ error }}</div>
+    {#- why=full: a check-in-link session was refused (auth.full_login_required).
+        Keyed off a fixed code; the text is never read from the URL. -#}
+    {% elif request.query_params.get('why') == 'full' %}<div class="flash warn">Sign in with your password to do that.</div>{% endif %}
     <form method="post" action="/login">
       <label for="email">Email</label>
       <input type="email" id="email" name="email" required autofocus

@@ -84,7 +84,10 @@ def test_sweep_routes_each_user_through_their_channel(env):
     text = teams[1]["json"]["text"]
     assert text.startswith("Tom Teams - ")                 # channel post names owner
     assert "Or, you can reply here like" not in text       # link-only
-    assert "[Update your numbers here](https://score.example.com/checkin?t=" in text
+    # A Teams webhook posts to a shared channel: the plain /checkin link (sign
+    # in), never a magic link anyone in the channel could click in with.
+    assert "[Update your numbers here](https://score.example.com/checkin)" in text
+    assert "?t=" not in text
 
     tw = by_host(calls, "api.twilio.com")[0]
     assert "AC123" in tw[0]

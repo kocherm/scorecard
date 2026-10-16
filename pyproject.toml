@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "time-machine>=3.5.1",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
