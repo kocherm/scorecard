@@ -333,12 +333,19 @@ class EntryIn(BaseModel):
 def write_entry(body: EntryIn, request: Request, metric_id: int = Path(description="Metric id from GET /api/v1/metrics"),
                 con: sqlite3.Connection = Depends(db_dep)):
     token = api_token_from_request(request, con, need_write=True)
+    return apply_entry(con, token, metric_id, body, datetime.now(timezone.utc))
+
+
+def apply_entry(con: sqlite3.Connection, token: sqlite3.Row, metric_id: int,
+                body: EntryIn, now: datetime) -> dict:
+    """The one write path for a weekly value, shared by POST .../entries and
+    the MCP server's report_number. The caller has already checked the token
+    can write; refusals are HTTPExceptions, raised before anything is written."""
     m = con.execute("SELECT * FROM metrics WHERE id = ? AND archived_at IS NULL",
                     (metric_id,)).fetchone()
     if m is None:
         raise HTTPException(404, "Unknown or archived metric")
 
-    now = datetime.now(timezone.utc)
     week = _week_or_422(body.week_start, now)
     if week < wk.parse_week(m["start_week"]):
         raise HTTPException(422, f"Metric starts {m['start_week']}")

@@ -15,8 +15,8 @@ so an integration never sees a different colour from the one on the wall.
 - **OpenAPI 3.1 schema:** `https://<your-scorecard>/api/v1/openapi.json`, also
   committed as [`docs/openapi.json`](openapi.json) for Postman, n8n and client
   generators
-- **Claude / MCP:** a read-only MCP server lives at `/mcp`; see
-  [MCP](#mcp-server) below
+- **Claude / MCP:** an MCP server lives at `/mcp`, read-only unless the
+  token can write; see [MCP](#mcp-server) below
 
 Examples use `https://scorecard.example.com` and a token in `$TOKEN`.
 
@@ -823,22 +823,37 @@ curl -X PATCH https://scorecard.example.com/api/v1/metrics/41 \
 
 ### An AI agent
 
-Give the agent a `read` token for [MCP](#mcp-server) to answer questions from the
-board, and a separate `write` token for the REST endpoints if it reports numbers.
-Tell it to call `GET /api/v1/metrics` or `GET /api/v1/ceo` first and to use the
-ids and names it finds there, never ones it remembers.
+Give an agent that only answers questions a `read` token for
+[MCP](#mcp-server). Give one that also reports numbers its own `write` token,
+sent as a Bearer header to `/mcp`: it then gets `report_number` alongside the
+read tools. The CEO breakdown and the admin endpoints are REST-only. Tell it to
+call `list_metrics` (or `GET /api/v1/metrics` / `GET /api/v1/ceo`) first and to
+use the ids and names it finds there, never ones it remembers.
 
 ## MCP server
 
-`POST /mcp` is a read-only [Model Context Protocol](https://modelcontextprotocol.io)
-server (Streamable HTTP, JSON-RPC 2.0) for Claude and other MCP clients. It
-answers from the same builders as `GET /scorecard` and `GET /metrics`, and it
-cannot write: a write through a shared connector would be attributed to the
-connector's token instead of the person reporting the number.
+`POST /mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server (Streamable HTTP, JSON-RPC 2.0) for Claude and other MCP clients. The
+token's scope decides the tools:
+
+| Token | Tools |
+|---|---|
+| `read` | `get_scorecard`, `get_check_in_status`, `list_metrics` - the same builders as `GET /scorecard` and `GET /metrics` |
+| `write`, `read_write`, `admin` | the above, plus `report_number` |
+
+`report_number` takes `metric_id`, and `value` or `status`, and optionally
+`week_start`. It is [POST /metrics/{metric_id}/entries](#post-metricsmetric_identries):
+the same validation, the same replace-what-is-there upsert, audited as `api` to
+the token. A refusal comes back as a tool result with `isError: true` and
+writes nothing. Admin actions are not offered over MCP, whatever the token's
+scope.
 
 - Authenticate with `Authorization: Bearer sc_...`, or, for clients that only
   accept a URL, `POST /mcp/t/{token}`. The URL form puts the token in proxy
-  logs, so use a `read` token there and rotate it if the URL leaks.
+  logs, so it accepts a `read` token only; rotate it if the URL leaks. A
+  shared connector (Claude in Slack) should use this form: a write through it
+  would be attributed to the connector's token instead of the person
+  reporting the number.
 - Admins get the connector URL for a token when it is created on
   **Admin > API tokens**.
 

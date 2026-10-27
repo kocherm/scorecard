@@ -86,14 +86,15 @@
      whose job is listing tokens. #}
   <details class="tok-help">
     <summary>How to connect Claude (MCP)</summary>
-  <p class="note">Claude reads the board through a read-only MCP server at
+  <p class="note">Claude reads the board through an MCP server at
     <span class="mono">{{ mcp_base }}/mcp</span> - three tools:
     <span class="mono">get_scorecard</span>,
     <span class="mono">get_check_in_status</span> (who still owes a number,
     split into not-yet-late and late, each with the DRI's Slack member ID so
-    Claude can tag them) and <span class="mono">list_metrics</span>. No writes:
-    numbers stay something a person reports, so the audit trail keeps naming
-    the person.</p>
+    Claude can tag them) and <span class="mono">list_metrics</span>. The
+    connector below is read-only, so the audit trail keeps naming the person
+    who reports each number. An agent with its own write token, sent as a
+    Bearer header, also gets <span class="mono">report_number</span>.</p>
   <p class="note">To connect it, create a <strong>read only</strong> token
     below - the page then shows a ready-to-paste connector URL of the form
     <span class="mono">{{ mcp_base }}/mcp/t/&lt;token&gt;</span>. Tokens are

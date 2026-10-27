@@ -85,8 +85,9 @@ both:
   red-escalation sweep Tue 8am, channel post + DM to the metric's owner.
 - **Ask it in Slack**: a remote MCP server at `/mcp` lets Claude read the board
   conversationally - "what's red this week?", "who hasn't updated?" - and hands
-  back each late DRI's Slack member ID so it can tag them. Read-only; humans
-  still write the numbers, and the scheduled nudges keep running regardless.
+  back each late DRI's Slack member ID so it can tag them. The shared Slack
+  connector is read-only; an agent given its own write token also gets
+  `report_number`. The scheduled nudges keep running regardless.
 - **Agent API**: bearer-token JSON API returning fully scored state (including
   who is stale and what is red) and accepting metric writes. Ideal for wiring up
   an AI agent or n8n/Zapier flows to feed metrics automatically.

@@ -76,12 +76,18 @@ Slack app manifest). Check `git grep` before every commit.
   stale. A fresh job's next run is computed from when it is added, so a
   container that was down over Tuesday 08:00 would otherwise skip the week.
   alerts.SCHEDULE must match the CronTriggers.
-- app/mcp.py is a remote MCP server (JSON-RPC over Streamable HTTP at /mcp) so
-  Claude can READ the board conversationally. It is read-only on purpose: an
-  API write is attributed to a token, and the connector authenticates as one
-  shared credential, so a write would show up in Activity as "the Claude token"
-  instead of the person. Its tools call app/api.py's build_scorecard /
-  metrics_rows - never a second query path.
+- app/mcp.py is a remote MCP server (JSON-RPC over Streamable HTTP at /mcp).
+  The token's SCOPE decides the tools, as it does for REST: a read token gets
+  the read tools; a write/read_write/admin token also gets report_number,
+  which calls api.apply_entry - the same function as POST .../entries, so one
+  validation path and one audit shape (source 'api', the token). Never give
+  MCP its own write logic. The SHARED connector (Claude in Slack, one
+  credential for everyone) must stay read-only, or a write lands in Activity
+  as "the Claude token" instead of the person; that is enforced by the URL
+  form (/mcp/t/<token>) accepting read tokens only, so keep that rule. Admin
+  actions (users, metrics, targets) stay REST-only. Read tools call
+  build_scorecard / metrics_rows - never a second query path. A refusal from
+  apply_entry is a tool result with isError, not a JSON-RPC error.
 - The API is documented in three places that must agree, and a test holds
   them together (tests/test_api_docs.py): docs/API.md (the written reference,
   one "### METHOD /path" section per endpoint), docs/openapi.json (generated:

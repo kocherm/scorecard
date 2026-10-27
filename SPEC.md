@@ -197,10 +197,15 @@ reconfiguring Slack first.
   while a metric is pending, so a stale-only list would answer "who was late"
   rather than "who should I nudge now". The connector URL carries the token in
   its path and is shown once, next to a freshly created or rotated token on
-  Admin > API tokens - tokens are hashed, so it cannot be reassembled later. Read-only, deliberately: writes over the API are attributed
-  to a token, and the connector is one shared credential, so a write here would
-  land in the audit trail as the connector rather than the person who reported
-  the number. Reminders stay with the scheduler - the sweeps are idempotent and
+  Admin > API tokens - tokens are hashed, so it cannot be reassembled later.
+  The token's scope decides the tools, as it decides the REST endpoints: a
+  write, read_write or admin token also gets `report_number`, which writes
+  through the same function as `POST /api/v1/metrics/{id}/entries` and is
+  audited the same way, to the token. The shared connector stays read-only:
+  everyone in Slack talks through one credential, so a write there would land
+  in the audit trail as the connector rather than the person who reported the
+  number - which is why the URL form accepts read tokens only. Admin actions
+  (people, metrics, targets) stay REST-only. Reminders stay with the scheduler - the sweeps are idempotent and
   keep firing whether or not Claude is reachable; Claude is the ad-hoc layer on
   top ("who's behind?"), not the reliable one.
 - **API** (`/api/v1`): bearer-token access for AI agents and automations.

@@ -1,5 +1,7 @@
 """The MCP server Claude connects to: handshake, tool discovery, tool calls,
-auth on both the header and path-token forms, and the read-only guarantee."""
+auth on both the header and path-token forms, and the rule that a token's
+scope decides the tools - read tokens (and so the shared URL-form connector)
+never see a write."""
 import json
 from datetime import datetime, timezone
 
@@ -28,7 +30,8 @@ def env(tmp_path, monkeypatch):
             """INSERT INTO metrics (id, section_id, name, metric_type, rollup,
                                     dri_user_id, start_week)
                VALUES (1, 1, 'Demos booked', 'numeric', 'sum', 1, ?)""", (START,))
-        tokens = {s: auth.new_api_token(con, s, s, 1) for s in ("read", "read_write")}
+        tokens = {s: auth.new_api_token(con, s, s, 1)
+                  for s in ("read", "write", "read_write", "admin")}
     yield TestClient(app), tokens
 
 
@@ -64,17 +67,159 @@ def test_initialize_falls_back_when_client_names_no_version(env):
     assert res["protocolVersion"]
 
 
-def test_tools_list_is_read_only(env):
+READ_TOOLS = {"get_scorecard", "get_check_in_status", "list_metrics"}
+
+
+def test_a_read_token_sees_only_read_tools(env):
     client, tk = env
     tools = rpc(client, tk["read"], "tools/list").json()["result"]["tools"]
-    names = {t["name"] for t in tools}
-    assert names == {"get_scorecard", "get_check_in_status", "list_metrics"}
-    # Nothing that mutates: writes would land in the audit trail as the shared
-    # connector token rather than a person.
-    assert not any(w in n for t in tools for n in [t["name"]]
-                   for w in ("write", "set", "update", "archive", "delete"))
+    assert {t["name"] for t in tools} == READ_TOOLS
+    # Nothing that mutates: the shared Slack connector holds a read token, and
+    # a write there would land in the audit trail as that token, not a person.
+    assert not any(w in t["name"] for t in tools
+                   for w in ("write", "set", "update", "archive", "delete", "report"))
     for t in tools:
         assert t["description"] and t["inputSchema"]["type"] == "object"
+
+
+@pytest.mark.parametrize("scope", ["write", "read_write", "admin"])
+def test_a_token_that_can_write_also_sees_report_number(env, scope):
+    client, tk = env
+    tools = rpc(client, tk[scope], "tools/list").json()["result"]["tools"]
+    assert {t["name"] for t in tools} == READ_TOOLS | {"report_number"}
+    # Admin-scope actions stay REST-only, whatever the token can do there.
+    assert not any(w in t["name"] for t in tools
+                   for w in ("archive", "user", "target", "section"))
+
+
+def test_instructions_match_what_the_token_can_do(env):
+    client, tk = env
+    ro = rpc(client, tk["read"], "initialize", {}).json()["result"]["instructions"]
+    rw = rpc(client, tk["write"], "initialize", {}).json()["result"]["instructions"]
+    assert "cannot write" in ro and "report_number" not in ro
+    assert "report_number" in rw
+
+
+def entry(metric_id, week):
+    with dbm.get_db() as con:
+        return con.execute(
+            """SELECT value_numeric, value_status, source, entered_by_token_id
+               FROM entries WHERE metric_id = ? AND week_start = ?""",
+            (metric_id, week)).fetchone()
+
+
+def token_id(name):
+    with dbm.get_db() as con:
+        return con.execute("SELECT id FROM api_tokens WHERE name = ?",
+                           (name,)).fetchone()["id"]
+
+
+def test_report_number_writes_through_the_api_path(env, monkeypatch):
+    client, tk = env
+    pin(monkeypatch, AFTER_DEADLINE)
+    out = tool(client, tk["write"], "report_number", {"metric_id": 1, "value": 7})
+    assert out["ok"] and out["week_start"] == "2026-02-23", "defaults to last closed week"
+    row = entry(1, "2026-02-23")
+    assert row["value_numeric"] == 7
+    # Audited exactly like a REST write: to the token, as source 'api'.
+    assert row["source"] == "api" and row["entered_by_token_id"] == token_id("write")
+    with dbm.get_db() as con:
+        audit = con.execute("SELECT source, actor_token_id FROM entry_audit").fetchall()
+    assert [tuple(a) for a in audit] == [("api", token_id("write"))]
+    # ...and the board reads it back: the number is no longer outstanding.
+    st = tool(client, tk["write"], "get_check_in_status")
+    assert st["stale"] == [] and st["pending"] == []
+
+
+def test_report_number_replaces_and_takes_an_explicit_week(env, monkeypatch):
+    client, tk = env
+    pin(monkeypatch, AFTER_DEADLINE)
+    tool(client, tk["admin"], "report_number",
+         {"metric_id": 1, "week_start": "2026-02-16", "value": 3})
+    tool(client, tk["admin"], "report_number",
+         {"metric_id": 1, "week_start": "2026-02-16", "value": 4})
+    assert entry(1, "2026-02-16")["value_numeric"] == 4
+
+
+def add_status_metric():
+    with dbm.get_db() as con:
+        con.execute(
+            """INSERT INTO metrics (id, section_id, name, metric_type, rollup,
+                                    dri_user_id, start_week)
+               VALUES (2, 1, 'Pipeline health', 'status', NULL, 1, ?)""", (START,))
+
+
+def test_report_number_status_metric(env, monkeypatch):
+    client, tk = env
+    pin(monkeypatch, AFTER_DEADLINE)
+    add_status_metric()
+    tool(client, tk["read_write"], "report_number", {"metric_id": 2, "status": "Y"})
+    assert entry(2, "2026-02-23")["value_status"] == "Y"
+
+
+def refused(client, token, args):
+    r = rpc(client, token, "tools/call", {"name": "report_number", "arguments": args})
+    assert r.status_code == 200, r.text
+    result = r.json()["result"]
+    assert result["isError"] is True, result
+    return result["content"][0]["text"]
+
+
+@pytest.mark.parametrize("args, says", [
+    ({"metric_id": 99, "value": 1}, "Unknown or archived metric"),
+    ({"metric_id": 1}, "value is required"),
+    ({"metric_id": 2, "status": "purple"}, "status must be"),
+    ({"metric_id": 1, "value": 1, "week_start": "2026-03-16"}, "future week"),
+    ({"metric_id": 1, "value": 1, "week_start": "2025-12-29"}, "Metric starts"),
+    ({"metric_id": "1", "value": 1}, "metric_id must be an integer"),
+    ({"metric_id": True, "value": 1}, "metric_id must be an integer"),
+    ({"metric_id": 1, "value": "lots"}, "value"),
+])
+def test_report_number_refusals_are_tool_errors_and_write_nothing(env, monkeypatch,
+                                                                  args, says):
+    client, tk = env
+    pin(monkeypatch, AFTER_DEADLINE)
+    add_status_metric()
+    assert says in refused(client, tk["write"], args)
+    with dbm.get_db() as con:
+        assert con.execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM entry_audit").fetchone()[0] == 0
+
+
+def test_report_number_refuses_an_archived_metric(env, monkeypatch):
+    client, tk = env
+    pin(monkeypatch, AFTER_DEADLINE)
+    with dbm.get_db() as con:
+        con.execute("UPDATE metrics SET archived_at = datetime('now') WHERE id=1")
+    assert "archived" in refused(client, tk["write"], {"metric_id": 1, "value": 1})
+
+
+def test_a_read_token_cannot_call_report_number(env):
+    client, tk = env
+    err = rpc(client, tk["read"], "tools/call",
+              {"name": "report_number",
+               "arguments": {"metric_id": 1, "value": 5}}).json()["error"]
+    assert err["code"] == -32602 and "read-only" in err["message"]
+    with dbm.get_db() as con:
+        assert con.execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 0
+
+
+def test_the_url_form_never_offers_a_write(env):
+    """The shared connector's route. It already refuses any token but a read
+    one, so it can never list or call report_number."""
+    client, tk = env
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    assert {t["name"] for t in client.post(f"/mcp/t/{tk['read']}", json=body)
+            .json()["result"]["tools"]} == READ_TOOLS
+    for scope in ("write", "read_write", "admin"):
+        assert client.post(f"/mcp/t/{tk[scope]}", json=body).status_code == 401
+
+
+def test_arguments_must_be_an_object(env):
+    client, tk = env
+    err = rpc(client, tk["write"], "tools/call",
+              {"name": "report_number", "arguments": [1, 5]}).json()["error"]
+    assert err["code"] == -32602
 
 
 def test_get_scorecard_returns_scored_state(env):
@@ -182,8 +327,7 @@ def test_path_token_form_works_and_rejects_a_bad_token(env):
     r = client.post(f"/mcp/t/{tk['read']}",
                     json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert r.status_code == 200
-    assert {t["name"] for t in r.json()["result"]["tools"]} == {
-        "get_scorecard", "get_check_in_status", "list_metrics"}
+    assert {t["name"] for t in r.json()["result"]["tools"]} == READ_TOOLS
     bad = client.post("/mcp/t/sc_nope",
                       json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert bad.status_code == 401
